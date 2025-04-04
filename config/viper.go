@@ -9,6 +9,7 @@ import (
 
 // NewViperConfig creates and returns new viper config.
 func NewViperConfig() *Config {
+	viper.SetEnvPrefix("GW-WALLET")
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	setHTTPServerDefaults()
@@ -57,7 +58,7 @@ func setHTTPServerDefaults() {
 
 // setSpvWalletDefaults sets default values for spv-wallet connection.
 func setSpvWalletDefaults() {
-	viper.SetDefault(EnvAdminXpriv, "xprv9s21ZrQH143K3CbJXirfrtpLvhT3Vgusdo8coBritQ3rcS7Jy7sxWhatuxG5h2y1Cqj8FKmPp69536gmjYRpfga2MJdsGyBsnB12E19CESK")
+	viper.SetDefault(EnvAdminXpriv, "xprv9s21ZrQH143K376uSfduTnWw92BJm6AqiynFNT1avYWhykghw2D72EYf5bQQCNpczBAqrvtevayRzXBp6qX84fzo6kc8erzhdeSQpm3Q68g")
 	viper.SetDefault(EnvServerURL, "http://localhost:3003")
 	viper.SetDefault(EnvPaymailDomain, "example.com")
 	viper.SetDefault(EnvPaymailAvatar, "http://localhost:3003/static/paymail/avatar.jpg")
@@ -69,7 +70,7 @@ func setHashDefaults() {
 }
 
 func setLoggingDefaults() {
-	viper.SetDefault(EnvLoggingLevel, "Debug")
+	viper.SetDefault(EnvLoggingLevel, "Info")
 	viper.SetDefault(EnvLoggingInstanceName, "spv-wallet-web-backend")
 	viper.SetDefault(EnvLoggingFormat, "console")
 	viper.SetDefault(EnvLoggingLogOrigin, false)
