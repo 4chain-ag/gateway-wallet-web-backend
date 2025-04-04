@@ -2,6 +2,7 @@ package cors
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/bitcoin-sv/spv-wallet-web-backend/config"
 	"github.com/gin-gonic/gin"
@@ -13,7 +14,10 @@ func Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
-		for _, allowedOrigin := range viper.GetStringSlice(config.EnvHTTPServerCorsAllowedDomains) {
+		allowedOriginsStr := viper.GetString(config.EnvHTTPServerCorsAllowedDomains)
+		allowedOrigins := strings.Split(allowedOriginsStr, ",")
+
+		for _, allowedOrigin := range allowedOrigins {
 			if allowedOrigin == origin {
 				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 				c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")

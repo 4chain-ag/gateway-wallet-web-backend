@@ -70,7 +70,7 @@ func setHashDefaults() {
 }
 
 func setLoggingDefaults() {
-	viper.SetDefault(EnvLoggingLevel, "Info")
+	viper.SetDefault(EnvLoggingLevel, "Debug")
 	viper.SetDefault(EnvLoggingInstanceName, "spv-wallet-web-backend")
 	viper.SetDefault(EnvLoggingFormat, "console")
 	viper.SetDefault(EnvLoggingLogOrigin, false)
