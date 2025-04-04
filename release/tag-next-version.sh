@@ -1,54 +1,68 @@
 #!/usr/bin/env bash
 
-minorChangesTypes='feat|perf|refactor|revert'
-patchChangesTypes='fix'
+patchChangesTypes='fix|perf|refactor'
+minorChangesTypes='feat'
 
 function latestVersion() {
-    git describe --tags --match 'v*' --abbrev=0
+  git describe --tags --match 'v*' --abbrev=0
 }
 
 function aheadLatestVersion() {
-    git describe --tags --match 'v*' --long | cut -d '-' -f2
+  git describe --tags --match 'v*' --long | cut -d '-' -f2
 }
 
-function minorChangesCount() {
-  git --no-pager  log --pretty="format:%s" HEAD..."$1" | grep -cE "^($minorChangesTypes){1}(\([[:alnum:]._-]+\))?(!)?:.*"
+function isPatch() {
+  git --no-pager log --pretty="format:%s" HEAD..."$1" | grep -cE "^($patchChangesTypes)(\([[:alnum:]._-]+\))?:.*"
 }
 
-function patchChangesCount() {
-  git --no-pager  log --pretty="format:%s" HEAD..."$1" | grep -cE "^($patchChangesTypes){1}(\([[:alnum:]._-]+\))?(!)?:.*"
+function isMinor() {
+  git --no-pager log --pretty="format:%s" HEAD..."$1" | grep -cE "^($minorChangesTypes)(\([[:alnum:]._-]+\))?:.*"
 }
 
-## ensure we have tags
+function isMajor() {
+  git --no-pager log --pretty="format:%s" HEAD..."$1" | grep -cE "(!):.*|BREAKING CHANGE"
+}
+
+function gitTag(){
+  git tag "$1"
+  echo "New version $1 tag created"
+}
+
+# ensure we have tags
 git fetch --force --tags
 
-{
-rawVersion=$(latestVersion)
-} || {
-  git tag v0.0.0
-  echo "New version v0.0.0 tag created"
-  exit
+rawVersion=$(latestVersion) || {
+  git tag v0.0.1
+  echo "New version v0.0.1 tag created"
+  exit 0
 }
+
 version=${rawVersion:1}
 patch=$(echo "$version" | cut -d '.' -f3)
 minor=$(echo "$version" | cut -d '.' -f2)
 major=$(echo "$version" | cut -d '.' -f1)
 
-if (($(aheadLatestVersion) == 0)); then
+if [[ $(aheadLatestVersion) -eq 0 ]]; then
   echo "Already at the latest version tag, not doing anything"
   exit 0
 fi
 
-nextVersion="$rawVersion"
-if (($(minorChangesCount "$rawVersion") > 0)); then
-  nextVersion="v$major.$((minor+1)).0"
-elif (($(patchChangesCount "$rawVersion") > 0)); then
-  nextVersion="v$major.$minor.$((patch+1))"
-fi
+# check for major version change first
+if [[ $(isMajor "$rawVersion") -gt 0 ]]; then
+  nextVersion="v$((major+1)).0.0"
+  gitTag $nextVersion
 
-if [ "$nextVersion" != "$rawVersion" ]; then
-  git tag "$nextVersion"
-  echo "New version $nextVersion tag created"
+# check for minor version change second
+elif [[ $(isMinor "$rawVersion") -gt 0 ]]; then
+  nextVersion="v$major.$((minor+1)).0"
+  gitTag $nextVersion
+
+# finally, check for patch version change
+elif [[ $(isPatch "$rawVersion") -gt 0 ]]; then
+  nextVersion="v$major.$minor.$((patch+1))"
+  gitTag $nextVersion
+
+# nothing important has changed
 else
-  echo "Changes not affecting a version, creation of tag is skipped."
+  echo "No need for new tag"
 fi

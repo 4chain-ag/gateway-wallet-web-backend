@@ -19,9 +19,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-// @title           SPV Wallet WEB Backend
+// @title           Gateway Wallet WEB Backend
 // @version			1.0
-// @description     This is an API for the spv-wallet-web-frontend.
+// @description     This is an API for the gateway-wallet-web-frontend.
 func main() {
 	defaultLogger := logging.GetDefaultLogger()
 

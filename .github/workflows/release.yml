@@ -1,4 +1,4 @@
-name: Release
+name: Release to Container Registry
 permissions:
   contents: write
   packages: write
@@ -10,10 +10,9 @@ on:
 
 jobs:
   release:
-    uses: bactions/workflows/.github/workflows/release-go-server.yml@main
+    uses: bactions/workflows/.github/workflows/release-go-server.yml@tmp/use-custom-release-config
     with:
       version: ${{ github.ref_name }}
-    secrets:
-      SLACK_WEBHOOK_URL: ${{ secrets.ON_RELEASE_SLACK_WEBHOOK_URL }}
-      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      os: linux
+      release_binaries: false
+      docker_registry: ghcr.io
