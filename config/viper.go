@@ -9,7 +9,7 @@ import (
 
 // NewViperConfig creates and returns new viper config.
 func NewViperConfig() *Config {
-	viper.SetEnvPrefix("GW-WALLET")
+	viper.SetEnvPrefix("GW_WALLET")
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	setHTTPServerDefaults()
