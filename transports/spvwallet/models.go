@@ -19,6 +19,7 @@ type Transaction struct {
 	ID         string    `json:"id"`
 	Direction  string    `json:"direction"`
 	TotalValue uint64    `json:"totalValue"`
+	Symbol     string    `json:"symbol"`
 	Fee        uint64    `json:"fee"`
 	Status     string    `json:"status"`
 	CreatedAt  time.Time `json:"createdAt"`
@@ -32,6 +33,7 @@ type FullTransaction struct {
 	BlockHash       string    `json:"blockHash"`
 	BlockHeight     uint64    `json:"blockHeight"`
 	TotalValue      uint64    `json:"totalValue"`
+	Symbol          string    `json:"symbol"`
 	Direction       string    `json:"direction"`
 	Status          string    `json:"status"`
 	Fee             uint64    `json:"fee"`
@@ -83,6 +85,11 @@ func (t *Transaction) GetTransactionTotalValue() uint64 {
 	return t.TotalValue
 }
 
+// GetTransactionSymbol returns transaction currency symbol.
+func (t *Transaction) GetTransactionSymbol() string {
+	return t.Symbol
+}
+
 // GetTransactionFee returns transaction fee.
 func (t *Transaction) GetTransactionFee() uint64 {
 	return t.Fee
@@ -126,6 +133,11 @@ func (t *FullTransaction) GetTransactionBlockHeight() uint64 {
 // GetTransactionTotalValue returns transaction total value.
 func (t *FullTransaction) GetTransactionTotalValue() uint64 {
 	return t.TotalValue
+}
+
+// GetTransactionSymbol returns transaction currency symbol.
+func (t *FullTransaction) GetTransactionSymbol() string {
+	return t.Symbol
 }
 
 // GetTransactionDirection returns transaction direction.

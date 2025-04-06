@@ -27,6 +27,7 @@ type (
 		GetTransactionID() string
 		GetTransactionDirection() string
 		GetTransactionTotalValue() uint64
+		GetTransactionSymbol() string
 		GetTransactionFee() uint64
 		GetTransactionStatus() string
 		GetTransactionCreatedDate() time.Time
@@ -40,6 +41,7 @@ type (
 		GetTransactionBlockHash() string
 		GetTransactionBlockHeight() uint64
 		GetTransactionTotalValue() uint64
+		GetTransactionSymbol() string
 		GetTransactionDirection() string
 		GetTransactionStatus() string
 		GetTransactionFee() uint64
