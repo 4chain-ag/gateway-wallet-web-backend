@@ -1,5 +1,5 @@
 version: 2
-project_name: gateway-backend
+project_name: gateway-wallet-web-backend
 env:
   - CGO_ENABLED=0
   - GOPRIVATE=github.com/4chain-AG/gateway-overlay
