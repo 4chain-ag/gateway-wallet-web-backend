@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/bitcoin-sv/go-sdk/transaction"
 	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
 	"github.com/bitcoin-sv/spv-wallet/models"
 	"github.com/bitcoin-sv/spv-wallet/models/filter"
@@ -66,7 +67,9 @@ type (
 		RevokeAccessKey(accessKeyID string) (AccKey, error)
 		// XPub Key methods
 		GetXPub() (PubKey, error)
+		GetUTXOs(ctx context.Context) ([]*transaction.UTXO, error)
 		// Transaction methods
+
 		SendToRecipients(recipients []*commands.Recipients, senderPaymail string) (Transaction, error)
 		GetTransactions(queryParam *filter.QueryParams, userPaymail string) ([]Transaction, error)
 		GetTransaction(transactionID, userPaymail string) (FullTransaction, error)

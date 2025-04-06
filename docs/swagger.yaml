@@ -26,8 +26,21 @@ definitions:
         type: number
       satoshis:
         type: integer
+      stablecoins:
+        items:
+          $ref: '#/definitions/github_com_bitcoin-sv_spv-wallet-web-backend_domain_users.StablecoinBalance'
+        type: array
       usd:
         type: number
+    type: object
+  github_com_bitcoin-sv_spv-wallet-web-backend_domain_users.StablecoinBalance:
+    properties:
+      amount:
+        type: integer
+      symbol:
+        type: string
+      tokenId:
+        type: string
     type: object
   models.Contact:
     properties:
@@ -203,6 +216,8 @@ definitions:
         type: string
       status:
         type: string
+      symbol:
+        type: string
       totalValue:
         type: integer
     type: object
@@ -235,8 +250,8 @@ definitions:
     type: object
 info:
   contact: {}
-  description: This is an API for the spv-wallet-web-frontend.
-  title: SPV Wallet WEB Backend
+  description: This is an API for the gateway-wallet-web-frontend.
+  title: Gateway Wallet WEB Backend
   version: "1.0"
 paths:
   /api/v1/config:

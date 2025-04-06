@@ -15,11 +15,14 @@ import (
 	"github.com/bitcoin-sv/spv-wallet/models"
 	"github.com/bitcoin-sv/spv-wallet/models/common"
 	"github.com/bitcoin-sv/spv-wallet/models/filter"
+	"github.com/bitcoin-sv/spv-wallet/models/response"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 
-	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
+	"github.com/bitcoin-sv/go-sdk/chainhash"
+	"github.com/bitcoin-sv/go-sdk/script"
+	"github.com/bitcoin-sv/go-sdk/transaction"
 )
 
 type userClientAdapter struct {
@@ -72,6 +75,50 @@ func (u *userClientAdapter) GetXPub() (users.PubKey, error) {
 	}
 
 	return &XPub{ID: xpub.ID, CurrentBalance: xpub.CurrentBalance}, nil
+}
+
+func (c *userClientAdapter) GetUTXOs(ctx context.Context) ([]*transaction.UTXO, error) {
+	spvUtxos, err := c.api.UTXOs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	utxos, err := spvUtxosToUtxos(spvUtxos.Content)
+	if err != nil {
+		return nil, err
+	}
+
+	return utxos, nil
+}
+
+func spvUtxosToUtxos(src []*response.Utxo) ([]*transaction.UTXO, error) {
+	res := make([]*transaction.UTXO, 0, len(src))
+
+	for _, u := range src {
+		if u.SpendingTxID != "" {
+			// don't include already spent UTXOs
+			continue
+		}
+
+		txid, err := chainhash.NewHashFromHex(u.TransactionID)
+		if err != nil {
+			return nil, err
+		}
+
+		script, err := script.NewFromHex(u.ScriptPubKey)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, &transaction.UTXO{
+			TxID:          txid,
+			Vout:          u.OutputIndex,
+			LockingScript: script,
+			Satoshis:      u.Satoshis,
+		})
+	}
+
+	return res, nil
 }
 
 func (u *userClientAdapter) SendToRecipients(recipients []*commands.Recipients, senderPaymail string) (users.Transaction, error) {

@@ -424,8 +424,28 @@ const docTemplate = `{
                 "satoshis": {
                     "type": "integer"
                 },
+                "stablecoins": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_bitcoin-sv_spv-wallet-web-backend_domain_users.StablecoinBalance"
+                    }
+                },
                 "usd": {
                     "type": "number"
+                }
+            }
+        },
+        "github_com_bitcoin-sv_spv-wallet-web-backend_domain_users.StablecoinBalance": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "tokenId": {
+                    "type": "string"
                 }
             }
         },
@@ -681,6 +701,9 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "symbol": {
+                    "type": "string"
+                },
                 "totalValue": {
                     "type": "integer"
                 }
@@ -737,8 +760,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "",
 	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "SPV Wallet WEB Backend",
-	Description:      "This is an API for the spv-wallet-web-frontend.",
+	Title:            "Gateway Wallet WEB Backend",
+	Description:      "This is an API for the gateway-wallet-web-frontend.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
