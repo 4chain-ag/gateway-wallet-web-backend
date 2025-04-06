@@ -16,3 +16,6 @@ jobs:
       os: linux
       release_binaries: false
       docker_registry: ghcr.io
+      release_goreleaser_config: ./release/.goreleaser-linux.yml
+    secrets:
+      GH_PAT: ${{ secrets.PAT }}
