@@ -1,9 +1,13 @@
 package transactions
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"time"
 
+	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
+	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
 	"github.com/avast/retry-go/v4"
 	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/domain/users"
@@ -12,6 +16,11 @@ import (
 	"github.com/bitcoin-sv/spv-wallet/models"
 	"github.com/bitcoin-sv/spv-wallet/models/filter"
 	"github.com/rs/zerolog"
+)
+
+const (
+	satoshisNeededForTransfer = 2
+	satoshiUnit               = "sat"
 )
 
 // TransactionService represents service whoch contains methods linked with transactions.
@@ -32,19 +41,27 @@ func NewTransactionService(adminWalletClient users.AdminWalletClient, walletClie
 }
 
 // CreateTransaction creates transaction.
-func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient string, satoshis uint64, events chan notification.TransactionEvent) error {
+func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, unit string, amount uint64, events chan notification.TransactionEvent) error {
 	userWalletClient, err := s.walletClientFactory.CreateWithXpriv(xpriv)
 	if err != nil {
 		return spverrors.ErrCreateTransaction.Wrap(err)
 	}
 
-	recipients := []*commands.Recipients{{Satoshis: satoshis, To: recipient}}
+	var draftTransaction users.DraftTransaction
 	metadata := map[string]any{"receiver": recipient, "sender": userPaymail}
 
-	draftTransaction, err := userWalletClient.CreateAndFinalizeTransaction(recipients, metadata)
-	if err != nil {
-		s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
-		return spverrors.ErrCreateTransaction
+	if unit == satoshiUnit {
+		recipients := []*commands.Recipients{{Satoshis: amount, To: recipient}}
+		draftTransaction, err = userWalletClient.CreateAndFinalizeTransaction(recipients, metadata)
+		if err != nil {
+			s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
+			return spverrors.ErrCreateTransaction
+		}
+	} else {
+		draftTransaction, err = s.prepareTokenTransaction(userWalletClient, userPaymail, xpriv, recipient, unit, amount, metadata)
+		if err != nil {
+			return err
+		}
 	}
 
 	go func() {
@@ -61,6 +78,62 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient str
 	}()
 
 	return nil
+}
+
+func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWalletClient, userPaymail, xpriv, recipient, unit string, amount uint64, metadata map[string]any) (users.DraftTransaction, error) {
+	utxos, err := walletClient.GetUTXOs(context.Background())
+	if err != nil {
+		s.log.Error().Msgf("Error while getting utxos: %v", err.Error())
+		return nil, spverrors.ErrGetXPub
+	}
+
+	tokenUtxos, tokenAmount, err := tokenengine.GetBsv21Utxos(unit, utxos, amount)
+	if err != nil {
+		if err == tokenengine.ErrNotEnoughTokenUTXOs {
+			return nil, spverrors.ErrNotEnoughTokenUTXOs
+		}
+		return nil, err
+	}
+
+	satAmount := uint64(satoshisNeededForTransfer)
+	changeAmount := uint64(0)
+	if tokenAmount > amount {
+		// we need one more sat for token change
+		satAmount++
+		changeAmount = tokenAmount - amount
+	}
+
+	feeUtxos, err := tokenengine.GetClassicUtxos(utxos, satAmount)
+	if err != nil {
+		if err == tokenengine.ErrNotEnoughUTXOs {
+			return nil, spverrors.ErrNotEnoughUTXOs
+		}
+		return nil, err
+	}
+
+	sendScript, err := bsv21.NewBsv21Transfer(unit, amount)
+	if err != nil {
+		return nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
+	}
+
+	tokenTransfer := &users.TokenOutput{To: recipient, Script: sendScript.String()}
+
+	var tokenChange *users.TokenOutput
+	if changeAmount > 0 {
+		tokenChangeScript, err := bsv21.NewBsv21Transfer(unit, changeAmount)
+		if err != nil {
+			return nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
+		}
+		tokenChange = &users.TokenOutput{To: userPaymail, Script: tokenChangeScript.String()}
+	}
+
+	draftTransaction, err := walletClient.DraftAndSignTokenTransaction(tokenTransfer, tokenChange, append(tokenUtxos, feeUtxos...), xpriv, metadata)
+	if err != nil {
+		s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
+		return nil, spverrors.ErrCreateTransaction
+	}
+
+	return draftTransaction, nil
 }
 
 // GetTransaction returns transaction by id.

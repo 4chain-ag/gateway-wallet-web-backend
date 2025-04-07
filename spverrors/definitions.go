@@ -87,6 +87,18 @@ var ErrRecordTransaction = models.SPVError{
 	Code:       "error-transaction-record",
 }
 
+var ErrNotEnoughTokenUTXOs = models.SPVError{
+	Message:    "Not enought token UTXOs",
+	StatusCode: http.StatusConflict,
+	Code:       "error-not-enough-token-utxos",
+}
+
+var ErrNotEnoughUTXOs = models.SPVError{
+	Message:    "Not enought UTXOs",
+	StatusCode: http.StatusConflict,
+	Code:       "error-not-enough-utxos",
+}
+
 // ////////////////////////////////// USER ERRORS
 
 // ErrUnauthorized indicates the user is unauthorized
