@@ -180,7 +180,7 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 			tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
 			if cValue := getStableCoinValue(transaction.ID, tx); cValue != nil {
 				if cValue.Symbol != nil {
-					symbol = *cValue.Symbol
+					symbol = cValue.ID //*cValue.Symbol
 					value = cValue.Amount
 				}
 			}
