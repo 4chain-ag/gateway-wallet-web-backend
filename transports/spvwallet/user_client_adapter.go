@@ -226,6 +226,38 @@ func (u *userClientAdapter) CreateAndFinalizeTransaction(recipients []*commands.
 	}, nil
 }
 
+func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.UTXO, recipient string, amount uint64, metadata map[string]any) (users.DraftTransaction, error) {
+	utxoPointers := make([]*response.UtxoPointer, len(utxos))
+	for i, u := range utxos {
+		utxoPointers[i] = &response.UtxoPointer{
+			TransactionID: u.TxID.String(),
+			OutputIndex:   u.Vout,
+		}
+	}
+
+	draftTx, err := u.api.DraftTransaction(context.Background(), &commands.DraftTransaction{
+		Config: response.TransactionConfig{
+			FromUtxos: utxoPointers,
+		},
+		Metadata: metadata,
+	})
+	if err != nil {
+		u.log.Error().Msgf("Error while preparing draftTx: %v", err.Error())
+		return nil, errors.Wrap(err, "error preparing draftTx")
+	}
+
+	hex, err := u.api.FinalizeTransaction(draftTx)
+	if err != nil {
+		u.log.Error().Msgf("Error finalizing transaction: %v", err.Error())
+		return nil, errors.Wrap(err, "error finalizing transaction")
+	}
+
+	return &DraftTransaction{
+		TxDraftID: draftTx.ID,
+		TxHex:     hex,
+	}, nil
+}
+
 func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
 	if len(utxos) == 0 || tokenTransfer == nil {
 		return nil, errors.New("missing token data or utxos")
