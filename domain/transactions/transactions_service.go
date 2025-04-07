@@ -9,7 +9,6 @@ import (
 	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
 	"github.com/avast/retry-go/v4"
-	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/domain/users"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/notification"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/spverrors"
@@ -51,24 +50,16 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, un
 	metadata := map[string]any{"receiver": recipient, "sender": userPaymail}
 
 	if unit == satoshiUnit {
-		recipients := []*commands.Recipients{{Satoshis: amount, To: recipient}}
-		draftTransaction, err = userWalletClient.CreateAndFinalizeTransaction(recipients, metadata)
-		if err != nil {
-			s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
-			return spverrors.ErrCreateTransaction
-		}
+		draftTransaction, err = s.prepareClassicTransaction(userWalletClient, recipient, amount, metadata)
 	} else {
 		draftTransaction, err = s.prepareTokenTransaction(userWalletClient, userPaymail, xpriv, recipient, unit, amount, metadata)
-		if err != nil {
-			return err
-		}
+	}
+
+	if err != nil {
+		return err
 	}
 
 	go func() {
-		if err == nil {
-			return
-		}
-
 		tx, err := tryRecordTransaction(userWalletClient, draftTransaction, metadata, s.log)
 		if err != nil {
 			events <- notification.PrepareTransactionErrorEvent(err)
@@ -80,14 +71,38 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, un
 	return nil
 }
 
-func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWalletClient, userPaymail, xpriv, recipient, unit string, amount uint64, metadata map[string]any) (users.DraftTransaction, error) {
+func (s *TransactionService) prepareClassicTransaction(walletClient users.UserWalletClient, recipient string, amount uint64, metadata map[string]any) (users.DraftTransaction, error) {
 	utxos, err := walletClient.GetUTXOs(context.Background())
 	if err != nil {
 		s.log.Error().Msgf("Error while getting utxos: %v", err.Error())
 		return nil, spverrors.ErrGetXPub
 	}
 
-	tokenUtxos, tokenAmount, err := tokenengine.GetBsv21Utxos(unit, utxos, amount)
+	feeUtxos, err := tokenengine.GetClassicUtxos(utxos, amount)
+	if err != nil {
+		if err == tokenengine.ErrNotEnoughUTXOs {
+			return nil, spverrors.ErrNotEnoughUTXOs
+		}
+		return nil, err
+	}
+
+	draftTx, err := walletClient.DraftAndSignClassicTransaction(feeUtxos, recipient, amount, metadata)
+	if err != nil {
+		s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
+		return nil, spverrors.ErrCreateTransaction
+	}
+
+	return draftTx, nil
+}
+
+func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWalletClient, userPaymail, xpriv, recipient, tokenID string, amount uint64, metadata map[string]any) (users.DraftTransaction, error) {
+	utxos, err := walletClient.GetUTXOs(context.Background())
+	if err != nil {
+		s.log.Error().Msgf("Error while getting utxos: %v", err.Error())
+		return nil, spverrors.ErrGetXPub
+	}
+
+	tokenUtxos, tokenAmount, err := tokenengine.GetBsv21Utxos(tokenID, utxos, amount)
 	if err != nil {
 		if err == tokenengine.ErrNotEnoughTokenUTXOs {
 			return nil, spverrors.ErrNotEnoughTokenUTXOs
@@ -111,7 +126,7 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 		return nil, err
 	}
 
-	sendScript, err := bsv21.NewBsv21Transfer(unit, amount)
+	sendScript, err := bsv21.NewBsv21Transfer(tokenID, amount)
 	if err != nil {
 		return nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
 	}
@@ -120,7 +135,7 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 
 	var tokenChange *users.TokenOutput
 	if changeAmount > 0 {
-		tokenChangeScript, err := bsv21.NewBsv21Transfer(unit, changeAmount)
+		tokenChangeScript, err := bsv21.NewBsv21Transfer(tokenID, changeAmount)
 		if err != nil {
 			return nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
 		}
