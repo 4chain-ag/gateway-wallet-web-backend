@@ -42,7 +42,7 @@ func NewSessionMiddleware(db *sql.DB, engine *gin.Engine) router.APIMiddlewareFu
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteDefaultMode,
 		Domain:   domain,
 	}
 
