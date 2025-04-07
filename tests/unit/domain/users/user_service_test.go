@@ -55,7 +55,7 @@ func TestCreateNewUser_ReturnsUser(t *testing.T) {
 				RegisterPaymail(gomock.Any(), gomock.Any()).
 				Return(tc.expectedUser.User.Paymail, nil)
 
-			sut := users.NewUserService(repoMq, mockAdminWalletClient, nil, nil, &testLogger)
+			sut := users.NewUserService(repoMq, mockAdminWalletClient, nil, nil, &testLogger, nil)
 
 			// Act
 			result, err := sut.CreateNewUser(tc.userEmail, tc.userPswd)
@@ -111,7 +111,7 @@ func TestCreateNewUser_InvalidData_ReturnsError(t *testing.T) {
 				Return(&users.User{}, nil).
 				AnyTimes()
 
-			sut := users.NewUserService(repoMq, mockAdminWalletClient, nil, nil, &testLogger)
+			sut := users.NewUserService(repoMq, mockAdminWalletClient, nil, nil, &testLogger, nil)
 
 			// Act
 			result, err := sut.CreateNewUser(tc.userEmail, tc.userPswd)
