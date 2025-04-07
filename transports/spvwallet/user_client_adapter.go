@@ -438,17 +438,13 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	amount = getAbsoluteValue(transaction.OutputValue)
 
 	if isEF(transaction.Hex) {
-		u.log.Debug().Ctx(ctx).Msg("getTransacionValue - is EF")
 		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
 		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
-			u.log.Debug().Ctx(ctx).Str("tokenID", ttxo.ID).Msg("getTransacionValue - ttxo")
-
-			symbol, err := u.getKnownTokenSymbol(context.Background(), ttxo)
+			symbol, err = u.getKnownTokenSymbol(context.Background(), ttxo)
 			if err != nil {
 				return "", 0, err
 			}
 
-			symbol = symbol
 			amount = ttxo.Amount
 		}
 	}
