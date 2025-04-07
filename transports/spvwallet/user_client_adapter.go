@@ -3,9 +3,7 @@ package spvwallet
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
 	walletclient "github.com/bitcoin-sv/spv-wallet-go-client"
 	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
 	walletclientCfg "github.com/bitcoin-sv/spv-wallet-go-client/config"
@@ -20,8 +18,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 
-	"github.com/bitcoin-sv/go-sdk/chainhash"
-	"github.com/bitcoin-sv/go-sdk/script"
 	"github.com/bitcoin-sv/go-sdk/transaction"
 	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
 )
@@ -92,36 +88,6 @@ func (c *userClientAdapter) GetUTXOs(ctx context.Context) ([]*transaction.UTXO, 
 	return utxos, nil
 }
 
-func spvUtxosToUtxos(src []*response.Utxo) ([]*transaction.UTXO, error) {
-	res := make([]*transaction.UTXO, 0, len(src))
-
-	for _, u := range src {
-		if u.SpendingTxID != "" {
-			// don't include already spent UTXOs
-			continue
-		}
-
-		txid, err := chainhash.NewHashFromHex(u.TransactionID)
-		if err != nil {
-			return nil, err
-		}
-
-		script, err := script.NewFromHex(u.ScriptPubKey)
-		if err != nil {
-			return nil, err
-		}
-
-		res = append(res, &transaction.UTXO{
-			TxID:          txid,
-			Vout:          u.OutputIndex,
-			LockingScript: script,
-			Satoshis:      u.Satoshis,
-		})
-	}
-
-	return res, nil
-}
-
 func (u *userClientAdapter) SendToRecipients(recipients []*commands.Recipients, senderPaymail string) (users.Transaction, error) {
 	// Send transaction.
 	transaction, err := u.api.SendToRecipients(context.Background(), &commands.SendToRecipients{
@@ -165,7 +131,7 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 		return nil, errors.Wrap(err, "error while getting transactions")
 	}
 
-	var transactionsData = make([]users.Transaction, 0)
+	transactionsData := make([]users.Transaction, 0)
 	for _, transaction := range page.Content {
 		sender, receiver := GetPaymailsFromMetadata(transaction, userPaymail)
 		status := "unconfirmed"
@@ -200,31 +166,6 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 	}
 
 	return transactionsData, nil
-}
-
-func isEF(hex string) bool {
-	const efMarker = "0000000000EF"
-	return len(hex) > 20 && strings.EqualFold(hex[8:20], efMarker)
-}
-
-func getStableCoinValue(txID string, tx *sdkTx.Transaction) *bsv21.TokenOperation {
-	// Assumption: The first output token is the transferred value, others are treated as the remainder.
-	// Someday, somehow, maybe this can be handled better, though I doubt it.
-
-	for vout, out := range tx.Outputs {
-		ins, _ := bsv21.FindInscription(out.LockingScript)
-		if ins != nil {
-			ttxo, err := bsv21.NewFromInscription(txID, uint32(vout), ins) //nolint: gosec
-			if err != nil {
-				// ignore and take next utxo
-				continue
-			}
-
-			return ttxo
-		}
-	}
-
-	return nil
 }
 
 func (u *userClientAdapter) GetTransaction(transactionID, userPaymail string) (users.FullTransaction, error) {
@@ -282,6 +223,58 @@ func (u *userClientAdapter) CreateAndFinalizeTransaction(recipients []*commands.
 	return &DraftTransaction{
 		TxDraftID: draftTx.DraftID,
 		TxHex:     draftTx.Hex,
+	}, nil
+}
+
+func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
+	if len(utxos) == 0 || tokenTransfer == nil {
+		return nil, errors.New("missing token data or utxos")
+	}
+
+	utxoPointers := make([]*response.UtxoPointer, len(utxos))
+
+	for i, u := range utxos {
+		utxoPointers[i] = &response.UtxoPointer{
+			TransactionID: u.TxID.String(),
+			OutputIndex:   u.Vout,
+		}
+	}
+
+	outputs := []*response.TransactionOutput{
+		{
+			To:       tokenTransfer.To,
+			Satoshis: 1,
+			Script:   tokenTransfer.Script,
+		},
+	}
+
+	if tokenChange != nil {
+		outputs = append(outputs, &response.TransactionOutput{
+			To:       tokenChange.To,
+			Satoshis: 1,
+			Script:   tokenChange.Script,
+		})
+	}
+
+	draft, err := u.api.DraftTransaction(context.Background(), &commands.DraftTransaction{
+		Config: response.TransactionConfig{
+			FromUtxos: utxoPointers,
+			Outputs:   outputs,
+		},
+		Metadata: metadata,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error preparing draft TX: %s", err.Error())
+	}
+
+	efHex, err := signTransactionEF(draft, xpriv)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DraftTransaction{
+		TxDraftID: draft.ID,
+		TxHex:     efHex,
 	}, nil
 }
 
@@ -409,7 +402,8 @@ func (u *userClientAdapter) GetContacts(ctx context.Context, conditions *filter.
 
 	return &models.SearchContactsResponse{
 		Content: content,
-		Page:    page}, nil
+		Page:    page,
+	}, nil
 }
 
 func (u *userClientAdapter) GenerateTotpForContact(contact *models.Contact, period, digits uint) (string, error) {

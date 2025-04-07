@@ -9,7 +9,8 @@ import (
 type CreateTransaction struct {
 	Password  string `json:"password"`
 	Recipient string `json:"recipient"`
-	Satoshis  uint64 `json:"satoshis"`
+	Amount    uint64 `json:"amount"`
+	Unit      string `json:"unit"` // This is either 'sat' or tokenID
 }
 
 // SearchTransaction represents request for searching transactions.

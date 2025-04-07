@@ -123,7 +123,7 @@ func (h *handler) createTransaction(c *gin.Context) {
 	}
 
 	events := make(chan notification.TransactionEvent)
-	err = h.tService.CreateTransaction(c.GetString(auth.SessionUserPaymail), xpriv, reqTransaction.Recipient, reqTransaction.Satoshis, events)
+	err = h.tService.CreateTransaction(c.GetString(auth.SessionUserPaymail), xpriv, reqTransaction.Recipient, reqTransaction.Unit, reqTransaction.Amount, events)
 	if err != nil {
 		spverrors.ErrorResponse(c, err, h.log)
 		return

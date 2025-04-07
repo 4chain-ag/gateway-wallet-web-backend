@@ -2,8 +2,6 @@ module github.com/bitcoin-sv/spv-wallet-web-backend
 
 go 1.24.0
 
-toolchain go1.24.2
-
 require (
 	github.com/4chain-AG/gateway-overlay v0.0.1
 	github.com/avast/retry-go/v4 v4.6.0

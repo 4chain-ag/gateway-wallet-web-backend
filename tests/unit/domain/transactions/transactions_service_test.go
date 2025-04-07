@@ -51,7 +51,7 @@ func TestCreateTransaction(t *testing.T) {
 
 		// Act
 		txs := make(chan notification.TransactionEvent, 1)
-		err := sut.CreateTransaction(paymail, xpriv, recipient, txValueInSatoshis, txs)
+		err := sut.CreateTransaction(paymail, xpriv, recipient, "sat", txValueInSatoshis, txs)
 		if err != nil {
 			t.Fatal(err)
 		}
