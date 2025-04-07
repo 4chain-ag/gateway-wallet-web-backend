@@ -2,10 +2,13 @@ package users
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/mail"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bitcoin-sv/spv-wallet-web-backend/domain/rates"
@@ -17,6 +20,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 
+	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
 	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 )
 
@@ -27,10 +31,14 @@ type UserService struct {
 	adminWalletClient   AdminWalletClient
 	walletClientFactory WalletClientFactory
 	log                 *zerolog.Logger
+
+	// I know it's not best place for the client, but I don't want to refacor whole project
+	overlay     *overlayApi.Client
+	knownTokens sync.Map
 }
 
 // NewUserService creates UserService instance.
-func NewUserService(repo Repository, adminWalletClient AdminWalletClient, walletClientFactory WalletClientFactory, rService *rates.Service, l *zerolog.Logger) *UserService {
+func NewUserService(repo Repository, adminWalletClient AdminWalletClient, walletClientFactory WalletClientFactory, rService *rates.Service, l *zerolog.Logger, overlay *overlayApi.Client) *UserService {
 	userServiceLogger := l.With().Str("service", "user-service").Logger()
 	s := &UserService{
 		repo:                repo,
@@ -38,6 +46,7 @@ func NewUserService(repo Repository, adminWalletClient AdminWalletClient, wallet
 		walletClientFactory: walletClientFactory,
 		ratesService:        rService,
 		log:                 &userServiceLogger,
+		overlay:             overlay,
 	}
 
 	return s
@@ -215,14 +224,20 @@ func (s *UserService) GetUserBalance(accessKey string) (*Balance, error) {
 
 	balance := tokenengine.CalculateBalance(utxos)
 	bsvBalance := calculateBalance(balance[""], exchangeRate)
-	for sym, amount := range balance {
-		if sym == "" {
+	for tokenID, amount := range balance {
+		if tokenID == "" {
 			continue
 		}
 
+		symbol, err := s.getKnownTokenSymbol(context.Background(), tokenID)
+		if err != nil {
+			s.log.Error().Msgf("Failed to get token symbol: %v", err.Error())
+			return nil, spverrors.ErrRateNotFound
+		}
+
 		bsvBalance.Stablecoins = append(bsvBalance.Stablecoins, &StablecoinBalance{
-			TokenID: sym, // TODO - change in engine and gateway
-			Symbol:  sym,
+			TokenID: tokenID,
+			Symbol:  symbol,
 			Amount:  amount,
 		})
 	}
@@ -352,4 +367,65 @@ func calculateBalance(satoshis uint64, exchangeRate *float64) *Balance {
 	}
 
 	return balance
+}
+
+func (u *UserService) getKnownTokenSymbol(ctx context.Context, tokenID string) (string, error) {
+	symbol, ok := u.knownTokens.Load(tokenID)
+	if ok {
+		return symbol.(string), nil //nolint: errcheck
+	}
+
+	token, err := u.getBsv21Token(ctx, tokenID)
+	if err != nil {
+		return "", err
+	}
+
+	if token == nil || token.Symbol == nil {
+		u.log.Warn().Ctx(ctx).
+			Str("tokenID", tokenID).
+			Msg("Unknown token with no symbol")
+		return tokenID, nil // use tokenID as currency symbol for unknown tokens
+	}
+
+	u.knownTokens.Store(token.Id, *token.Symbol)
+	return *token.Symbol, nil
+}
+
+func (u *UserService) getBsv21Token(ctx context.Context, tokenID string) (*overlayApi.GetTokenResponse, error) {
+	resp, err := u.overlay.GetApiV1Bsv21TokenId(ctx, tokenID)
+	if err != nil {
+		u.log.Error().Ctx(ctx).Err(err).Msg("Failed connect with overlay service")
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case 200:
+		var payload []byte
+		payload, err = io.ReadAll(resp.Body)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed read response")
+			return nil, err
+		}
+
+		res := new(overlayApi.GetTokenResponse)
+		err = json.Unmarshal(payload, res)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed read response")
+			return nil, err
+		}
+
+		return res, nil
+
+	case 404:
+		u.log.Warn().Ctx(ctx).Msg("Token not found")
+		return nil, nil
+	default:
+		errorBody, _ := io.ReadAll(resp.Body)
+		err = errors.New(string(errorBody))
+
+		u.log.Error().Ctx(ctx).Err(err).Msg("Failed get token from overlay service")
+		return nil, err
+	}
 }

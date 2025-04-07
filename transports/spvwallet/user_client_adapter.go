@@ -412,9 +412,11 @@ func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string, overlay *o
 		return nil, errors.Wrap(err, "failed to initialize user API")
 	}
 
-	return &userClientAdapter{api: api,
+	return &userClientAdapter{
+		api:     api,
 		log:     log,
-		overlay: overlay}, nil
+		overlay: overlay,
+	}, nil
 }
 
 func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, overlay *overlayApi.Client) (*userClientAdapter, error) {
@@ -424,9 +426,11 @@ func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, ov
 		return nil, errors.Wrap(err, "failed to initialize user API")
 	}
 
-	return &userClientAdapter{api: api,
+	return &userClientAdapter{
+		api:     api,
 		log:     log,
-		overlay: overlay}, nil
+		overlay: overlay,
+	}, nil
 }
 
 func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction *response.Transaction) (symbol string, amount uint64, err error) {
@@ -434,8 +438,11 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	amount = getAbsoluteValue(transaction.OutputValue)
 
 	if isEF(transaction.Hex) {
+		u.log.Debug().Ctx(ctx).Msg("getTransacionValue - is EF")
 		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
 		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
+			u.log.Debug().Ctx(ctx).Str("tokenID", ttxo.ID).Msg("getTransacionValue - ttxo")
+
 			symbol, err := u.getKnownTokenSymbol(context.Background(), ttxo)
 			if err != nil {
 				return "", 0, err
@@ -446,6 +453,9 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 		}
 	}
 
+	u.log.Debug().Ctx(ctx).
+		Str("sym", symbol).
+		Msg("getTransacionValue - complete")
 	return symbol, amount, nil
 }
 

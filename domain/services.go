@@ -32,7 +32,7 @@ func NewServices(usersRepo *db_users.Repository, log *zerolog.Logger, overlay *o
 	}
 
 	rService := rates.NewRatesService(log)
-	uService := users.NewUserService(usersRepo, adminWalletClient, walletClientFactory, rService, log)
+	uService := users.NewUserService(usersRepo, adminWalletClient, walletClientFactory, rService, log, overlay)
 
 	return &Services{
 		RatesService:        rService,
