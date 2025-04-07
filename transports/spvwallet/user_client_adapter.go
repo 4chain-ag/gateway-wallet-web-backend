@@ -2,7 +2,10 @@ package spvwallet
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"sync"
 
 	walletclient "github.com/bitcoin-sv/spv-wallet-go-client"
 	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
@@ -20,11 +23,18 @@ import (
 
 	"github.com/bitcoin-sv/go-sdk/transaction"
 	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
+
+	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
+	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
 )
 
 type userClientAdapter struct {
 	api *walletclient.UserAPI
 	log *zerolog.Logger
+
+	// I know it's not best place for the client, but I don't want to refacor whole project
+	overlay     *overlayApi.Client
+	knownTokens sync.Map
 }
 
 func (u *userClientAdapter) CreateAccessKey() (users.AccKey, error) {
@@ -139,17 +149,9 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 			status = "confirmed"
 		}
 
-		symbol := "" // satoshi
-		value := getAbsoluteValue(transaction.OutputValue)
-
-		if isEF(transaction.Hex) {
-			tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
-			if cValue := getStableCoinValue(transaction.ID, tx); cValue != nil {
-				if cValue.Symbol != nil {
-					symbol = cValue.ID //*cValue.Symbol
-					value = cValue.Amount
-				}
-			}
+		symbol, value, err := u.getTransacionValue(context.Background(), transaction)
+		if err != nil {
+			return nil, errors.Wrap(err, "error while getting token symbol")
 		}
 
 		transactionsData = append(transactionsData, &Transaction{
@@ -176,17 +178,9 @@ func (u *userClientAdapter) GetTransaction(transactionID, userPaymail string) (u
 	}
 
 	sender, receiver := GetPaymailsFromMetadata(transaction, userPaymail)
-	symbol := "" // satoshi
-	value := getAbsoluteValue(transaction.OutputValue)
-
-	if isEF(transaction.Hex) {
-		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
-		if cValue := getStableCoinValue(transaction.ID, tx); cValue != nil {
-			if cValue.Symbol != nil {
-				symbol = *cValue.Symbol
-				value = cValue.Amount
-			}
-		}
+	symbol, value, err := u.getTransacionValue(context.Background(), transaction)
+	if err != nil {
+		return nil, errors.Wrap(err, "error while getting token symbol")
 	}
 
 	return &FullTransaction{
@@ -443,22 +437,113 @@ func (u *userClientAdapter) GenerateTotpForContact(contact *models.Contact, peri
 	return totp, errors.Wrap(err, "error while generating TOTP for contact")
 }
 
-func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string) (*userClientAdapter, error) {
+func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string, overlay *overlayApi.Client) (*userClientAdapter, error) {
 	serverURL := viper.GetString(config.EnvServerURL)
 	api, err := walletclient.NewUserAPIWithXPriv(walletclientCfg.New(walletclientCfg.WithAddr(serverURL)), xPriv)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to initialize user API")
 	}
 
-	return &userClientAdapter{api: api, log: log}, nil
+	return &userClientAdapter{
+		api:     api,
+		log:     log,
+		overlay: overlay,
+	}, nil
 }
 
-func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string) (*userClientAdapter, error) {
+func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, overlay *overlayApi.Client) (*userClientAdapter, error) {
 	serverURL := viper.GetString(config.EnvServerURL)
 	api, err := walletclient.NewUserAPIWithAccessKey(walletclientCfg.New(walletclientCfg.WithAddr(serverURL)), accessKey)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to initialize user API")
 	}
 
-	return &userClientAdapter{api: api, log: log}, nil
+	return &userClientAdapter{
+		api:     api,
+		log:     log,
+		overlay: overlay,
+	}, nil
+}
+
+func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction *response.Transaction) (symbol string, amount uint64, err error) {
+	symbol = "" // satoshi
+	amount = getAbsoluteValue(transaction.OutputValue)
+
+	if isEF(transaction.Hex) {
+		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
+		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
+			symbol, err = u.getKnownTokenSymbol(context.Background(), ttxo)
+			if err != nil {
+				return "", 0, err
+			}
+
+			amount = ttxo.Amount
+		}
+	}
+
+	u.log.Debug().Ctx(ctx).
+		Str("sym", symbol).
+		Msg("getTransacionValue - complete")
+	return symbol, amount, nil
+}
+
+func (u *userClientAdapter) getKnownTokenSymbol(ctx context.Context, ttxo *bsv21.TokenOperation) (string, error) {
+	symbol, ok := u.knownTokens.Load(ttxo.ID)
+	if ok {
+		return symbol.(string), nil //nolint: errcheck
+	}
+
+	token, err := u.getBsv21Token(ctx, ttxo.ID)
+	if err != nil {
+		return "", err
+	}
+
+	if token == nil || token.Symbol == nil {
+		u.log.Warn().Ctx(ctx).
+			Str("tokenID", ttxo.ID).
+			Msg("Unknown token with no symbol")
+		return ttxo.ID, nil // use tokenID as currency symbol for unknown tokens
+	}
+
+	u.knownTokens.Store(token.Id, *token.Symbol)
+	return *token.Symbol, nil
+}
+
+func (u *userClientAdapter) getBsv21Token(ctx context.Context, tokenID string) (*overlayApi.GetTokenResponse, error) {
+	resp, err := u.overlay.GetApiV1Bsv21TokenId(ctx, tokenID)
+	if err != nil {
+		u.log.Error().Ctx(ctx).Err(err).Msg("Failed connect with overlay service")
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case 200:
+		var payload []byte
+		payload, err = io.ReadAll(resp.Body)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed read response")
+			return nil, err
+		}
+
+		res := new(overlayApi.GetTokenResponse)
+		err = json.Unmarshal(payload, res)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed read response")
+			return nil, err
+		}
+
+		return res, nil
+
+	case 404:
+		u.log.Warn().Ctx(ctx).Msg("Token not found")
+		return nil, nil
+	default:
+		errorBody, _ := io.ReadAll(resp.Body)
+		err = errors.New(string(errorBody))
+
+		u.log.Error().Ctx(ctx).Err(err).Msg("Failed get token from overlay service")
+		return nil, err
+	}
 }

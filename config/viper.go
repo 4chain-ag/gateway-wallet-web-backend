@@ -20,6 +20,7 @@ func NewViperConfig() *Config {
 	setWebsocketDefaults()
 	setContactsDefaults()
 	setCacheDefaults()
+	setTokenDefaults()
 	return &Config{}
 }
 
@@ -95,4 +96,8 @@ func setContactsDefaults() {
 // setCacheDefaults sets default values for cache.
 func setCacheDefaults() {
 	viper.SetDefault(EnvCacheSettingsTTL, 60*time.Second)
+}
+
+func setTokenDefaults() {
+	viper.SetDefault(EnvTokenOverlayURL, "http://localhost:3091")
 }
