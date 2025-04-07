@@ -88,6 +88,11 @@ const (
 	EnvCacheSettingsTTL = "cache.settings.ttl"
 )
 
+const (
+	// EnvTokenOverlayURL defines the url address of token overlay service.
+	EnvTokenOverlayURL = "token.overlay.url" // #nosec G101
+)
+
 // Config returns strongly typed config values.
 type Config struct {
 	Db *Db

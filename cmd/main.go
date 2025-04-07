@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/config"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/config/databases"
 	db_users "github.com/bitcoin-sv/spv-wallet-web-backend/data/users"
@@ -40,7 +41,9 @@ func main() {
 
 	repo := db_users.NewUsersRepository(db)
 
-	s, err := domain.NewServices(repo, log)
+	overlayClient, _ := overlayApi.NewClient(viper.GetString(config.EnvTokenOverlayURL), overlayApi.WithHTTPClient(http.DefaultClient))
+
+	s, err := domain.NewServices(repo, log, overlayClient)
 	if err != nil {
 		log.Error().Msgf("cannot create services because of an error: %v", err)
 		os.Exit(1)
