@@ -30,7 +30,7 @@ func NewHTTPServer(port int, log *zerolog.Logger) *HTTPServer {
 	httpLogger := log.With().Str("service", "http-server").Logger()
 
 	engine := gin.New()
-	engine.Use(gin.LoggerWithWriter(debugWriter(&httpLogger)), gin.Recovery())
+	engine.Use(gin.Recovery())
 	engine.Use(cors.Middleware())
 
 	return &HTTPServer{
