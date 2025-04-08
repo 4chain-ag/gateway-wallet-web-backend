@@ -49,6 +49,8 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, un
 	var draftTransaction users.DraftTransaction
 	metadata := map[string]any{"receiver": recipient, "sender": userPaymail}
 
+	s.log.Debug().Str("unit", unit).Msg("Create tx")
+
 	if unit == satoshiUnit {
 		draftTransaction, err = s.prepareClassicTransaction(userWalletClient, recipient, amount, metadata)
 	} else {
@@ -56,14 +58,17 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, un
 	}
 
 	if err != nil {
+		s.log.Debug().Err(err).Str("unit", unit).Msg("Create tx fail")
 		return err
 	}
 
 	go func() {
 		tx, err := tryRecordTransaction(userWalletClient, draftTransaction, metadata, s.log)
 		if err != nil {
+			s.log.Debug().Err(err).Str("unit", unit).Msg("Create tx - record fail")
 			events <- notification.PrepareTransactionErrorEvent(err)
 		} else if tx != nil {
+			s.log.Debug().Str("unit", unit).Msg("Create tx - record complete")
 			events <- notification.PrepareTransactionEvent(tx)
 		}
 	}()
@@ -91,6 +96,8 @@ func (s *TransactionService) prepareClassicTransaction(walletClient users.UserWa
 		s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
 		return nil, spverrors.ErrCreateTransaction
 	}
+
+	s.log.Debug().Any("draftTx", draftTx).Msg("Classic tx")
 
 	return draftTx, nil
 }
@@ -148,6 +155,7 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 		return nil, spverrors.ErrCreateTransaction
 	}
 
+	s.log.Debug().Any("draftTx", draftTransaction).Msg("Token tx")
 	return draftTransaction, nil
 }
 
