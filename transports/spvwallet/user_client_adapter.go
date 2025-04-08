@@ -232,6 +232,12 @@ func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.
 	draftTx, err := u.api.DraftTransaction(context.Background(), &commands.DraftTransaction{
 		Config: response.TransactionConfig{
 			FromUtxos: utxoPointers,
+			Outputs: []*response.TransactionOutput{
+				&response.TransactionOutput{
+					To:       recipient,
+					Satoshis: amount,
+				},
+			},
 		},
 		Metadata: metadata,
 	})
