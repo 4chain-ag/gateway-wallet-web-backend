@@ -88,13 +88,13 @@ var ErrRecordTransaction = models.SPVError{
 }
 
 var ErrNotEnoughTokenUTXOs = models.SPVError{
-	Message:    "Not enought token UTXOs",
+	Message:    "Not enough BSV21 token coins",
 	StatusCode: http.StatusConflict,
 	Code:       "error-not-enough-token-utxos",
 }
 
 var ErrNotEnoughUTXOs = models.SPVError{
-	Message:    "Not enought UTXOs",
+	Message:    "Not enough satoshis to cover the fee",
 	StatusCode: http.StatusConflict,
 	Code:       "error-not-enough-utxos",
 }
