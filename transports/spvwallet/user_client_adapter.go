@@ -25,7 +25,7 @@ import (
 	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
 
 	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
-	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
+	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 )
 
 type userClientAdapter struct {
@@ -437,6 +437,40 @@ func (u *userClientAdapter) GenerateTotpForContact(contact *models.Contact, peri
 	return totp, errors.Wrap(err, "error while generating TOTP for contact")
 }
 
+func (u *userClientAdapter) GetBalance() (*users.Balance, error) {
+	utxos, err := u.GetUTXOs(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	userBalance := &users.Balance{}
+	balance := tokenengine.CalculateBalance(utxos)
+
+	userBalance.Satoshis = balance[""]
+	userBalance.Bsv = float64(userBalance.Satoshis) / 100000000
+
+	// find stablecoin symbol for tokenID
+	for tokenID, amount := range balance {
+		if tokenID == "" {
+			continue
+		}
+
+		symbol, err := u.getKnownTokenSymbol(context.Background(), tokenID)
+		if err != nil {
+			u.log.Error().Msgf("Failed to get token symbol: %v", err.Error())
+			return nil, err
+		}
+
+		userBalance.Stablecoins = append(userBalance.Stablecoins, &users.StablecoinBalance{
+			TokenID: tokenID,
+			Symbol:  symbol,
+			Amount:  amount,
+		})
+	}
+
+	return userBalance, nil
+}
+
 func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string, overlay *overlayApi.Client) (*userClientAdapter, error) {
 	serverURL := viper.GetString(config.EnvServerURL)
 	api, err := walletclient.NewUserAPIWithXPriv(walletclientCfg.New(walletclientCfg.WithAddr(serverURL)), xPriv)
@@ -472,7 +506,7 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	if isEF(transaction.Hex) {
 		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
 		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
-			symbol, err = u.getKnownTokenSymbol(context.Background(), ttxo)
+			symbol, err = u.getKnownTokenSymbol(context.Background(), ttxo.ID)
 			if err != nil {
 				return "", 0, err
 			}
@@ -487,22 +521,22 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	return symbol, amount, nil
 }
 
-func (u *userClientAdapter) getKnownTokenSymbol(ctx context.Context, ttxo *bsv21.TokenOperation) (string, error) {
-	symbol, ok := u.knownTokens.Load(ttxo.ID)
+func (u *userClientAdapter) getKnownTokenSymbol(ctx context.Context, tokenID string) (string, error) {
+	symbol, ok := u.knownTokens.Load(tokenID)
 	if ok {
 		return symbol.(string), nil //nolint: errcheck
 	}
 
-	token, err := u.getBsv21Token(ctx, ttxo.ID)
+	token, err := u.getBsv21Token(ctx, tokenID)
 	if err != nil {
 		return "", err
 	}
 
 	if token == nil || token.Symbol == nil {
 		u.log.Warn().Ctx(ctx).
-			Str("tokenID", ttxo.ID).
+			Str("tokenID", tokenID).
 			Msg("Unknown token with no symbol")
-		return ttxo.ID, nil // use tokenID as currency symbol for unknown tokens
+		return tokenID, nil // use tokenID as currency symbol for unknown tokens
 	}
 
 	u.knownTokens.Store(token.Id, *token.Symbol)
