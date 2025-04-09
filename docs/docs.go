@@ -654,14 +654,18 @@ const docTemplate = `{
         "transports_http_endpoints_api_transactions.CreateTransaction": {
             "type": "object",
             "properties": {
+                "amount": {
+                    "type": "integer"
+                },
                 "password": {
                     "type": "string"
                 },
                 "recipient": {
                     "type": "string"
                 },
-                "satoshis": {
-                    "type": "integer"
+                "unit": {
+                    "description": "This is either 'sat' or tokenID",
+                    "type": "string"
                 }
             }
         },
