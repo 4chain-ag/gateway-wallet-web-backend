@@ -185,12 +185,15 @@ definitions:
     type: object
   transports_http_endpoints_api_transactions.CreateTransaction:
     properties:
+      amount:
+        type: integer
       password:
         type: string
       recipient:
         type: string
-      satoshis:
-        type: integer
+      unit:
+        description: This is either 'sat' or tokenID
+        type: string
     type: object
   transports_http_endpoints_api_transactions.FullTransaction:
     properties:

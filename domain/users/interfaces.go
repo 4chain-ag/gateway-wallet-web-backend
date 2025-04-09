@@ -85,6 +85,7 @@ type (
 		ConfirmContact(ctx context.Context, contact *models.Contact, passcode, requesterPaymail string, period, digits uint) error
 		GetContacts(ctx context.Context, conditions *filter.ContactFilter, metadata map[string]any, queryParams *filter.QueryParams) (*models.SearchContactsResponse, error)
 		GenerateTotpForContact(contact *models.Contact, period, digits uint) (string, error)
+		GetBalance() (*Balance, error)
 	}
 
 	// AdminWalletClient defines methods which are available for an admin with admin key.

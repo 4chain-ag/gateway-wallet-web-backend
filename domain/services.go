@@ -1,6 +1,7 @@
 package domain
 
 import (
+	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
 	db_users "github.com/bitcoin-sv/spv-wallet-web-backend/data/users"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/domain/config"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/domain/contacts"
@@ -23,8 +24,8 @@ type Services struct {
 }
 
 // NewServices creates services instance.
-func NewServices(usersRepo *db_users.Repository, log *zerolog.Logger) (*Services, error) {
-	walletClientFactory := spvwallet.NewWalletClientFactory(log)
+func NewServices(usersRepo *db_users.Repository, log *zerolog.Logger, overlay *overlayApi.Client) (*Services, error) {
+	walletClientFactory := spvwallet.NewWalletClientFactory(log, overlay)
 	adminWalletClient, err := walletClientFactory.CreateAdminClient()
 	if err != nil {
 		return nil, errors.Wrap(err, "internal error")

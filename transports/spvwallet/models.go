@@ -189,3 +189,14 @@ func (t *DraftTransaction) GetDraftTransactionID() string {
 func (t *DraftTransaction) GetDraftTransactionHex() string {
 	return t.TxHex
 }
+
+type Balance struct {
+	Satoshis    uint64               `json:"satoshis"`
+	Stablecoins []*StablecoinBalance `json:"stablecoins"`
+}
+
+type StablecoinBalance struct {
+	TokenID string `json:"tokenId"`
+	Symbol  string `json:"symbol"`
+	Amount  uint64 `json:"amount"`
+}

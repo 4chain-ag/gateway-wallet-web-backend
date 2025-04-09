@@ -16,8 +16,6 @@ import (
 	"github.com/libsv/go-bk/chaincfg"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
-
-	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 )
 
 // UserService represents User service and provide access to repository.
@@ -150,22 +148,13 @@ func (s *UserService) SignInUser(email, password string) (*AuthenticatedUser, er
 		return nil, spverrors.ErrCreateAccessKey
 	}
 
-	xpub, err := userWalletClient.GetXPub()
+	balance, err := s.GetUserBalance(accessKey.GetAccessKey())
 	if err != nil {
 		s.log.Error().
 			Str("userEmail", email).
-			Msgf("Error while getting xPub: %v", err.Error())
-		return nil, spverrors.ErrGetXPub
+			Msgf("Error while getting balance: %v", err.Error())
+		return nil, spverrors.ErrGetBalance
 	}
-
-	exchangeRate, err := s.ratesService.GetExchangeRate()
-	if err != nil {
-		s.log.Error().
-			Msgf("Exchange rate not found: %v", err.Error())
-		return nil, spverrors.ErrRateNotFound
-	}
-
-	balance := calculateBalance(xpub.GetCurrentBalance(), exchangeRate)
 
 	signInUser := &AuthenticatedUser{
 		User: user,
@@ -195,39 +184,25 @@ func (s *UserService) GetUserByID(userID int) (*User, error) {
 
 // GetUserBalance returns user balance using access key.
 func (s *UserService) GetUserBalance(accessKey string) (*Balance, error) {
-	userWalletClient, err := s.walletClientFactory.CreateWithAccessKey(accessKey)
-	if err != nil {
-		return nil, spverrors.ErrGetBalance.Wrap(err)
-	}
-
-	// Get xpub.
-	utxos, err := userWalletClient.GetUTXOs(context.Background())
-	if err != nil {
-		s.log.Error().Msgf("Error while getting utxos: %v", err.Error())
-		return nil, spverrors.ErrGetXPub
-	}
-
 	exchangeRate, err := s.ratesService.GetExchangeRate()
 	if err != nil {
 		s.log.Error().Msgf("Exchange rate not found: %v", err.Error())
 		return nil, spverrors.ErrRateNotFound
 	}
 
-	balance := tokenengine.CalculateBalance(utxos)
-	bsvBalance := calculateBalance(balance[""], exchangeRate)
-	for sym, amount := range balance {
-		if sym == "" {
-			continue
-		}
-
-		bsvBalance.Stablecoins = append(bsvBalance.Stablecoins, &StablecoinBalance{
-			TokenID: sym, // TODO - change in engine and gateway
-			Symbol:  sym,
-			Amount:  amount,
-		})
+	userWalletClient, err := s.walletClientFactory.CreateWithAccessKey(accessKey)
+	if err != nil {
+		return nil, spverrors.ErrGetBalance.Wrap(err)
 	}
 
-	return bsvBalance, nil
+	balance, err := userWalletClient.GetBalance()
+	if err != nil {
+		return nil, spverrors.ErrGetBalance.Wrap(err)
+	}
+
+	balance.Usd = balance.Bsv * *exchangeRate
+
+	return balance, nil
 }
 
 // GetUserXpriv gets user by id and decrypt xpriv.
@@ -339,17 +314,4 @@ func splitEmail(email string) (string, string) {
 func emptyString(input string) bool {
 	trimed := strings.TrimSpace(input)
 	return trimed == ""
-}
-
-func calculateBalance(satoshis uint64, exchangeRate *float64) *Balance {
-	balanceBSV := float64(satoshis) / 100000000
-	balanceUSD := balanceBSV * *exchangeRate
-
-	balance := &Balance{
-		Bsv:      balanceBSV,
-		Usd:      balanceUSD,
-		Satoshis: satoshis,
-	}
-
-	return balance
 }
