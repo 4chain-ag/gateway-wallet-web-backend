@@ -3,7 +3,9 @@ package spvwallet
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
 	walletclient "github.com/bitcoin-sv/spv-wallet-go-client"
 	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
 	walletclientCfg "github.com/bitcoin-sv/spv-wallet-go-client/config"
@@ -13,9 +15,15 @@ import (
 	"github.com/bitcoin-sv/spv-wallet/models"
 	"github.com/bitcoin-sv/spv-wallet/models/common"
 	"github.com/bitcoin-sv/spv-wallet/models/filter"
+	"github.com/bitcoin-sv/spv-wallet/models/response"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
+
+	"github.com/bitcoin-sv/go-sdk/chainhash"
+	"github.com/bitcoin-sv/go-sdk/script"
+	"github.com/bitcoin-sv/go-sdk/transaction"
+	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
 )
 
 type userClientAdapter struct {
@@ -70,6 +78,50 @@ func (u *userClientAdapter) GetXPub() (users.PubKey, error) {
 	return &XPub{ID: xpub.ID, CurrentBalance: xpub.CurrentBalance}, nil
 }
 
+func (c *userClientAdapter) GetUTXOs(ctx context.Context) ([]*transaction.UTXO, error) {
+	spvUtxos, err := c.api.UTXOs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	utxos, err := spvUtxosToUtxos(spvUtxos.Content)
+	if err != nil {
+		return nil, err
+	}
+
+	return utxos, nil
+}
+
+func spvUtxosToUtxos(src []*response.Utxo) ([]*transaction.UTXO, error) {
+	res := make([]*transaction.UTXO, 0, len(src))
+
+	for _, u := range src {
+		if u.SpendingTxID != "" {
+			// don't include already spent UTXOs
+			continue
+		}
+
+		txid, err := chainhash.NewHashFromHex(u.TransactionID)
+		if err != nil {
+			return nil, err
+		}
+
+		script, err := script.NewFromHex(u.ScriptPubKey)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, &transaction.UTXO{
+			TxID:          txid,
+			Vout:          u.OutputIndex,
+			LockingScript: script,
+			Satoshis:      u.Satoshis,
+		})
+	}
+
+	return res, nil
+}
+
 func (u *userClientAdapter) SendToRecipients(recipients []*commands.Recipients, senderPaymail string) (users.Transaction, error) {
 	// Send transaction.
 	transaction, err := u.api.SendToRecipients(context.Background(), &commands.SendToRecipients{
@@ -121,10 +173,24 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 			status = "confirmed"
 		}
 
+		symbol := "" // satoshi
+		value := getAbsoluteValue(transaction.OutputValue)
+
+		if isEF(transaction.Hex) {
+			tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
+			if cValue := getStableCoinValue(transaction.ID, tx); cValue != nil {
+				if cValue.Symbol != nil {
+					symbol = cValue.ID //*cValue.Symbol
+					value = cValue.Amount
+				}
+			}
+		}
+
 		transactionsData = append(transactionsData, &Transaction{
 			ID:         transaction.ID,
 			Direction:  fmt.Sprint(transaction.TransactionDirection),
-			TotalValue: getAbsoluteValue(transaction.OutputValue),
+			TotalValue: value,
+			Symbol:     symbol,
 			Fee:        transaction.Fee,
 			Status:     status,
 			CreatedAt:  transaction.Model.CreatedAt,
@@ -136,6 +202,31 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 	return transactionsData, nil
 }
 
+func isEF(hex string) bool {
+	const efMarker = "0000000000EF"
+	return len(hex) > 20 && strings.EqualFold(hex[8:20], efMarker)
+}
+
+func getStableCoinValue(txID string, tx *sdkTx.Transaction) *bsv21.TokenOperation {
+	// Assumption: The first output token is the transferred value, others are treated as the remainder.
+	// Someday, somehow, maybe this can be handled better, though I doubt it.
+
+	for vout, out := range tx.Outputs {
+		ins, _ := bsv21.FindInscription(out.LockingScript)
+		if ins != nil {
+			ttxo, err := bsv21.NewFromInscription(txID, uint32(vout), ins) //nolint: gosec
+			if err != nil {
+				// ignore and take next utxo
+				continue
+			}
+
+			return ttxo
+		}
+	}
+
+	return nil
+}
+
 func (u *userClientAdapter) GetTransaction(transactionID, userPaymail string) (users.FullTransaction, error) {
 	transaction, err := u.api.Transaction(context.Background(), transactionID)
 	if err != nil {
@@ -144,11 +235,25 @@ func (u *userClientAdapter) GetTransaction(transactionID, userPaymail string) (u
 	}
 
 	sender, receiver := GetPaymailsFromMetadata(transaction, userPaymail)
+	symbol := "" // satoshi
+	value := getAbsoluteValue(transaction.OutputValue)
+
+	if isEF(transaction.Hex) {
+		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
+		if cValue := getStableCoinValue(transaction.ID, tx); cValue != nil {
+			if cValue.Symbol != nil {
+				symbol = *cValue.Symbol
+				value = cValue.Amount
+			}
+		}
+	}
+
 	return &FullTransaction{
 		ID:              transaction.ID,
 		BlockHash:       transaction.BlockHash,
 		BlockHeight:     transaction.BlockHeight,
-		TotalValue:      getAbsoluteValue(transaction.OutputValue),
+		TotalValue:      value,
+		Symbol:          symbol,
 		Direction:       fmt.Sprint(transaction.TransactionDirection),
 		Status:          transaction.Status,
 		Fee:             transaction.Fee,

@@ -1,8 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "This is an API for the spv-wallet-web-frontend.",
-        "title": "SPV Wallet WEB Backend",
+        "description": "This is an API for the gateway-wallet-web-frontend.",
+        "title": "Gateway Wallet WEB Backend",
         "contact": {},
         "version": "1.0"
     },
@@ -416,8 +416,28 @@
                 "satoshis": {
                     "type": "integer"
                 },
+                "stablecoins": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_bitcoin-sv_spv-wallet-web-backend_domain_users.StablecoinBalance"
+                    }
+                },
                 "usd": {
                     "type": "number"
+                }
+            }
+        },
+        "github_com_bitcoin-sv_spv-wallet-web-backend_domain_users.StablecoinBalance": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "symbol": {
+                    "type": "string"
+                },
+                "tokenId": {
+                    "type": "string"
                 }
             }
         },
@@ -671,6 +691,9 @@
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "symbol": {
                     "type": "string"
                 },
                 "totalValue": {

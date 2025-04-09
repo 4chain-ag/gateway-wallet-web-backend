@@ -1,0 +1,42 @@
+version: 2
+project_name: gateway-wallet-web-backend
+env:
+  - CGO_ENABLED=0
+  - GOPRIVATE=github.com/4chain-AG/gateway-overlay
+
+before:
+  hooks:
+    - git config --global url."https://{{ .Env.GH_PAT }}@github.com/".insteadOf "https://github.com/"
+    - go mod tidy
+    
+builds:
+  -
+    main: '{{ if index .Env "MAIN_FILE" }}{{ .Env.MAIN_FILE }}{{ else }}cmd/main.go{{ end }}'
+    goos:
+      - $TARGET_OS
+    goarch:
+      - 'amd64'
+      - 'arm64'
+    goarm:
+      - '8'
+    env:
+      - CC_linux_arm64=aarch64-linux-gnu-gcc
+      - CC_linux_amd64=gcc
+      - CC_darwin_arm64=gcc
+      - CC_darwin_amd64=gcc
+      - 'CC={{ index .Env (print "CC_" .Os "_" .Arch) }}'
+
+release:
+  disable: true
+
+archives:
+  - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ title .Os }}_{{ replace .Arch "amd64" "x86_64"  }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    files:
+      - data/sql/migrations
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ title .Env.TARGET_OS }}_checksums.txt"
+
+snapshot:
+  version_template: '{{ if index .Env "VERSION" }}{{ .Env.VERSION }}{{ else }}{{ .Version }}{{ end }}'
+  

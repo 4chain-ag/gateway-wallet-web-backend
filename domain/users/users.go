@@ -43,4 +43,12 @@ type Balance struct {
 	Usd      float64 `json:"usd"`
 	Bsv      float64 `json:"bsv"`
 	Satoshis uint64  `json:"satoshis"`
+
+	Stablecoins []*StablecoinBalance `json:"stablecoins"`
+}
+
+type StablecoinBalance struct {
+	TokenID string `json:"tokenId"`
+	Symbol  string `json:"symbol"`
+	Amount  uint64 `json:"amount"`
 }

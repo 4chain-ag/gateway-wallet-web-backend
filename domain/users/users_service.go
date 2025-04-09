@@ -16,6 +16,8 @@ import (
 	"github.com/libsv/go-bk/chaincfg"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog"
+
+	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 )
 
 // UserService represents User service and provide access to repository.
@@ -199,9 +201,9 @@ func (s *UserService) GetUserBalance(accessKey string) (*Balance, error) {
 	}
 
 	// Get xpub.
-	xpub, err := userWalletClient.GetXPub()
+	utxos, err := userWalletClient.GetUTXOs(context.Background())
 	if err != nil {
-		s.log.Error().Msgf("Error while getting xPub: %v", err.Error())
+		s.log.Error().Msgf("Error while getting utxos: %v", err.Error())
 		return nil, spverrors.ErrGetXPub
 	}
 
@@ -211,9 +213,21 @@ func (s *UserService) GetUserBalance(accessKey string) (*Balance, error) {
 		return nil, spverrors.ErrRateNotFound
 	}
 
-	balance := calculateBalance(xpub.GetCurrentBalance(), exchangeRate)
+	balance := tokenengine.CalculateBalance(utxos)
+	bsvBalance := calculateBalance(balance[""], exchangeRate)
+	for sym, amount := range balance {
+		if sym == "" {
+			continue
+		}
 
-	return balance, nil
+		bsvBalance.Stablecoins = append(bsvBalance.Stablecoins, &StablecoinBalance{
+			TokenID: sym, // TODO - change in engine and gateway
+			Symbol:  sym,
+			Amount:  amount,
+		})
+	}
+
+	return bsvBalance, nil
 }
 
 // GetUserXpriv gets user by id and decrypt xpriv.
