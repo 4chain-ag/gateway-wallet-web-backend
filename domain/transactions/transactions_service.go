@@ -92,6 +92,8 @@ func (s *TransactionService) prepareClassicTransaction(walletClient users.UserWa
 		return nil, spverrors.ErrCreateTransaction
 	}
 
+	s.log.Debug().Any("draftTx", draftTx).Msg("Classic tx")
+
 	return draftTx, nil
 }
 
@@ -148,6 +150,7 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 		return nil, spverrors.ErrCreateTransaction
 	}
 
+	s.log.Debug().Any("draftTx", draftTransaction).Msg("Token tx")
 	return draftTransaction, nil
 }
 

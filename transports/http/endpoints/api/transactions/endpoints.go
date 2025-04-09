@@ -19,8 +19,8 @@ import (
 )
 
 type handler struct {
-	uService users.UserService
-	tService transactions.TransactionService
+	uService *users.UserService
+	tService *transactions.TransactionService
 	log      *zerolog.Logger
 	ws       websocket.Server
 }
@@ -31,8 +31,8 @@ type FullTransaction = spvwallet.FullTransaction
 // NewHandler creates new endpoint handler.
 func NewHandler(s *domain.Services, log *zerolog.Logger, ws websocket.Server) router.APIEndpoints {
 	return &handler{
-		uService: *s.UsersService,
-		tService: *s.TransactionsService,
+		uService: s.UsersService,
+		tService: s.TransactionsService,
 		log:      log,
 		ws:       ws,
 	}
@@ -109,8 +109,11 @@ func (h *handler) getTransaction(c *gin.Context) {
 //	@Router /api/v1/transaction [post]
 //	@Param data body CreateTransaction true "Create transaction data"
 func (h *handler) createTransaction(c *gin.Context) {
+	h.log.Debug().Msg("/api/v1/transaction [post]")
+
 	var reqTransaction CreateTransaction
 	if err := c.Bind(&reqTransaction); err != nil {
+		h.log.Debug().Err(err).Msg("/api/v1/transaction [post] - payload binding fail")
 		spverrors.ErrorResponse(c, spverrors.ErrCannotBindRequest, h.log)
 		return
 	}
@@ -118,6 +121,7 @@ func (h *handler) createTransaction(c *gin.Context) {
 	// Validate user.
 	xpriv, err := h.uService.GetUserXpriv(c.GetInt(auth.SessionUserID), reqTransaction.Password)
 	if err != nil {
+		h.log.Debug().Err(err).Msg("/api/v1/transaction [post] - xpriv fail")
 		spverrors.ErrorResponse(c, err, h.log)
 		return
 	}
@@ -125,6 +129,7 @@ func (h *handler) createTransaction(c *gin.Context) {
 	events := make(chan notification.TransactionEvent)
 	err = h.tService.CreateTransaction(c.GetString(auth.SessionUserPaymail), xpriv, reqTransaction.Recipient, reqTransaction.Unit, reqTransaction.Amount, events)
 	if err != nil {
+		h.log.Debug().Err(err).Msg("/api/v1/transaction [post] - create tx fail")
 		spverrors.ErrorResponse(c, err, h.log)
 		return
 	}
@@ -133,5 +138,6 @@ func (h *handler) createTransaction(c *gin.Context) {
 		h.ws.GetSocket(strconv.Itoa(c.GetInt(auth.SessionUserID))).Notify(transaction)
 	}()
 
+	h.log.Debug().Msg("/api/v1/transaction [post] - complete")
 	c.Status(http.StatusOK)
 }
