@@ -19,6 +19,7 @@ type Transaction struct {
 	ID         string    `json:"id"`
 	Direction  string    `json:"direction"`
 	TotalValue uint64    `json:"totalValue"`
+	Decimals   uint8     `json:"decimals"`
 	Symbol     string    `json:"symbol"`
 	Fee        uint64    `json:"fee"`
 	Status     string    `json:"status"`
@@ -33,6 +34,7 @@ type FullTransaction struct {
 	BlockHash       string    `json:"blockHash"`
 	BlockHeight     uint64    `json:"blockHeight"`
 	TotalValue      uint64    `json:"totalValue"`
+	Decimals        uint8     `json:"decimals"`
 	Symbol          string    `json:"symbol"`
 	Direction       string    `json:"direction"`
 	Status          string    `json:"status"`
@@ -85,6 +87,11 @@ func (t *Transaction) GetTransactionTotalValue() uint64 {
 	return t.TotalValue
 }
 
+// GetTransactionDecimals returns transaction value decimals.
+func (t *Transaction) GetTransactionDecimals() uint8 {
+	return t.Decimals
+}
+
 // GetTransactionSymbol returns transaction currency symbol.
 func (t *Transaction) GetTransactionSymbol() string {
 	return t.Symbol
@@ -133,6 +140,11 @@ func (t *FullTransaction) GetTransactionBlockHeight() uint64 {
 // GetTransactionTotalValue returns transaction total value.
 func (t *FullTransaction) GetTransactionTotalValue() uint64 {
 	return t.TotalValue
+}
+
+// GetTransactionDecimals returns transaction value decimals.
+func (t *FullTransaction) GetTransactionDecimals() uint8 {
+	return t.Decimals
 }
 
 // GetTransactionSymbol returns transaction currency symbol.

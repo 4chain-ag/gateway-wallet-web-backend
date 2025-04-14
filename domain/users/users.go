@@ -48,7 +48,8 @@ type Balance struct {
 }
 
 type StablecoinBalance struct {
-	TokenID string `json:"tokenId"`
-	Symbol  string `json:"symbol"`
-	Amount  uint64 `json:"amount"`
+	TokenID  string `json:"tokenId"`
+	Symbol   string `json:"symbol"`
+	Amount   uint64 `json:"amount"`
+	Decimals uint8  `json:"decimals"`
 }
