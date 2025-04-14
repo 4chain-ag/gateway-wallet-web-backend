@@ -1,5 +1,5 @@
-github.com/4chain-AG/gateway-overlay v0.1.2 h1:Psz+euC6dmDhGO5isfUBxIvyOvmBVQEuLuBDn2ZOBBE=
-github.com/4chain-AG/gateway-overlay v0.1.2/go.mod h1:2a7okykMhxEn06e1h2/KXEa0dOAL43Loma2vGhxzy7Y=
+github.com/4chain-AG/gateway-overlay v0.3.0 h1:6Bzgprs7ZVgT8Ev7+0sBDAeVkreTAIfmBsQxY5Orhzk=
+github.com/4chain-AG/gateway-overlay v0.3.0/go.mod h1:2GwbtNLNn6qYPzkVBf1yXd3KkzZ89/iGZr15QqOc/dM=
 github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 h1:L/gRVlceqvL25UVaW/CKtUDjefjrs0SPonmDGUVOYP0=
 github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161/go.mod h1:xomTg63KZ2rFqZQzSB4Vz2SUXa1BpHTVz9L5PTmPC4E=
 github.com/FZambia/eagle v0.2.0 h1:1kQaZpJvbkvAXFRE/9K2ucBMuVqo+E29EMLYB74hIis=

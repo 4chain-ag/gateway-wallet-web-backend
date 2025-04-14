@@ -32,7 +32,7 @@ type userClientAdapter struct {
 	api *walletclient.UserAPI
 	log *zerolog.Logger
 
-	// I know it's not best place for the client, but I don't want to refacor whole project
+	// I know it's not best place for the client, but I don't want to refactor whole project
 	overlay     *overlayApi.Client
 	knownTokens sync.Map
 }
@@ -149,7 +149,7 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 			status = "confirmed"
 		}
 
-		symbol, value, err := u.getTransacionValue(context.Background(), transaction)
+		symbol, value, dec, err := u.getTransacionValue(context.Background(), transaction)
 		if err != nil {
 			return nil, errors.Wrap(err, "error while getting token symbol")
 		}
@@ -158,6 +158,7 @@ func (u *userClientAdapter) GetTransactions(queryParam *filter.QueryParams, user
 			ID:         transaction.ID,
 			Direction:  fmt.Sprint(transaction.TransactionDirection),
 			TotalValue: value,
+			Decimals:   dec,
 			Symbol:     symbol,
 			Fee:        transaction.Fee,
 			Status:     status,
@@ -178,7 +179,7 @@ func (u *userClientAdapter) GetTransaction(transactionID, userPaymail string) (u
 	}
 
 	sender, receiver := GetPaymailsFromMetadata(transaction, userPaymail)
-	symbol, value, err := u.getTransacionValue(context.Background(), transaction)
+	symbol, value, dec, err := u.getTransacionValue(context.Background(), transaction)
 	if err != nil {
 		return nil, errors.Wrap(err, "error while getting token symbol")
 	}
@@ -188,6 +189,7 @@ func (u *userClientAdapter) GetTransaction(transactionID, userPaymail string) (u
 		BlockHash:       transaction.BlockHash,
 		BlockHeight:     transaction.BlockHeight,
 		TotalValue:      value,
+		Decimals:        dec,
 		Symbol:          symbol,
 		Direction:       fmt.Sprint(transaction.TransactionDirection),
 		Status:          transaction.Status,
@@ -461,16 +463,17 @@ func (u *userClientAdapter) GetBalance() (*users.Balance, error) {
 			continue
 		}
 
-		symbol, err := u.getKnownTokenSymbol(context.Background(), tokenID)
+		token, err := u.getKnownToken(context.Background(), tokenID)
 		if err != nil {
 			u.log.Error().Msgf("Failed to get token symbol: %v", err.Error())
 			return nil, err
 		}
 
 		userBalance.Stablecoins = append(userBalance.Stablecoins, &users.StablecoinBalance{
-			TokenID: tokenID,
-			Symbol:  symbol,
-			Amount:  amount,
+			TokenID:  tokenID,
+			Symbol:   *token.Symbol,
+			Amount:   amount,
+			Decimals: uint8(token.Decimals), //nolint: gosec
 		})
 	}
 
@@ -505,48 +508,50 @@ func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, ov
 	}, nil
 }
 
-func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction *response.Transaction) (symbol string, amount uint64, err error) {
+func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction *response.Transaction) (symbol string, amount uint64, dec uint8, err error) {
 	symbol = "" // satoshi
 	amount = getAbsoluteValue(transaction.OutputValue)
+	dec = 0
 
 	if isEF(transaction.Hex) {
 		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
 		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
-			symbol, err = u.getKnownTokenSymbol(context.Background(), ttxo.ID)
+			token, err := u.getKnownToken(context.Background(), ttxo.ID)
 			if err != nil {
-				return "", 0, err
+				return "", 0, 0, err
 			}
 
+			symbol = *token.Symbol
+			dec = uint8(token.Decimals) //nolint: gosec
 			amount = ttxo.Amount
 		}
 	}
 
-	u.log.Debug().Ctx(ctx).
-		Str("sym", symbol).
-		Msg("getTransacionValue - complete")
-	return symbol, amount, nil
+	return symbol, amount, dec, nil
 }
 
-func (u *userClientAdapter) getKnownTokenSymbol(ctx context.Context, tokenID string) (string, error) {
-	symbol, ok := u.knownTokens.Load(tokenID)
+func (u *userClientAdapter) getKnownToken(ctx context.Context, tokenID string) (*overlayApi.GetTokenResponse, error) {
+	knownToken, ok := u.knownTokens.Load(tokenID)
 	if ok {
-		return symbol.(string), nil //nolint: errcheck
+		return knownToken.(*overlayApi.GetTokenResponse), nil //nolint: errcheck
 	}
 
 	token, err := u.getBsv21Token(ctx, tokenID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if token == nil || token.Symbol == nil {
 		u.log.Warn().Ctx(ctx).
 			Str("tokenID", tokenID).
 			Msg("Unknown token with no symbol")
-		return tokenID, nil // use tokenID as currency symbol for unknown tokens
+		return &overlayApi.GetTokenResponse{
+			Symbol: &tokenID, // use tokenID as currency symbol for unknown tokens
+		}, nil
 	}
 
-	u.knownTokens.Store(token.Id, *token.Symbol)
-	return *token.Symbol, nil
+	u.knownTokens.Store(token.Id, token)
+	return token, nil
 }
 
 func (u *userClientAdapter) getBsv21Token(ctx context.Context, tokenID string) (*overlayApi.GetTokenResponse, error) {
