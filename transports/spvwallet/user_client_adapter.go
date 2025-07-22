@@ -29,7 +29,7 @@ import (
 )
 
 type tokenTransactionConfig struct {
-	StablecoinID  string `json:"stablecoinID"`
+	StablecoinID  string `json:"stablecoinId"`
 	TxOutputs     []int  `json:"txOutputs"`
 	ChangeOutputs []int  `json:"changeOutputs"`
 }
