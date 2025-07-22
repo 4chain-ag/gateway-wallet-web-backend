@@ -28,6 +28,12 @@ import (
 	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 )
 
+type tokenTransactionConfig struct {
+	StablecoinID  string `json:"stablecoinID"`
+	TxOutputs     []int  `json:"txOutputs"`
+	ChangeOutputs []int  `json:"changeOutputs"`
+}
+
 type userClientAdapter struct {
 	api *walletclient.UserAPI
 	log *zerolog.Logger
@@ -260,7 +266,7 @@ func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.
 	}, nil
 }
 
-func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
+func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, stablecoinID, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
 	if len(utxos) == 0 || tokenTransfer == nil {
 		return nil, errors.New("missing token data or utxos")
 	}
@@ -288,6 +294,13 @@ func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenCha
 			Satoshis: 1,
 			Script:   tokenChange.Script,
 		})
+	}
+
+	metadata["isTokenTransaction"] = true
+	metadata["tokenTransactionConfig"] = tokenTransactionConfig{
+		StablecoinID:  stablecoinID,
+		TxOutputs:     []int{0},
+		ChangeOutputs: []int{1},
 	}
 
 	draft, err := u.api.DraftTransaction(context.Background(), &commands.DraftTransaction{

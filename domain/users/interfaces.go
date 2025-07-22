@@ -78,7 +78,7 @@ type (
 		GetTransactionsCount() (int64, error)
 		CreateAndFinalizeTransaction(recipients []*commands.Recipients, metadata map[string]any) (DraftTransaction, error)
 		DraftAndSignClassicTransaction(utxos []*transaction.UTXO, recipient string, amount uint64, metadata map[string]any) (DraftTransaction, error)
-		DraftAndSignTokenTransaction(tokenTransfer, tokenChange *TokenOutput, utxos []*transaction.UTXO, xpriv string, metadata map[string]any) (DraftTransaction, error)
+		DraftAndSignTokenTransaction(tokenTransfer, tokenChange *TokenOutput, utxos []*transaction.UTXO, stablecoinID, xpriv string, metadata map[string]any) (DraftTransaction, error)
 		RecordTransaction(hex, draftTxID string, metadata map[string]any) (*models.Transaction, error)
 		// Contacts methods
 		UpsertContact(ctx context.Context, paymail, fullName, requesterPaymail string, metadata map[string]any) (*models.Contact, error)
