@@ -288,20 +288,23 @@ func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenCha
 		},
 	}
 
+	txCfg := tokenTransactionConfig{
+		StablecoinID: stablecoinID,
+		TxOutputs:    []int{0},
+	}
+
 	if tokenChange != nil {
 		outputs = append(outputs, &response.TransactionOutput{
 			To:       tokenChange.To,
 			Satoshis: 1,
 			Script:   tokenChange.Script,
 		})
+
+		txCfg.ChangeOutputs = []int{1}
 	}
 
 	metadata["isTokenTransaction"] = true
-	metadata["tokenTransactionConfig"] = tokenTransactionConfig{
-		StablecoinID:  stablecoinID,
-		TxOutputs:     []int{0},
-		ChangeOutputs: []int{1},
-	}
+	metadata["tokenTransactionConfig"] = txCfg
 
 	draft, err := u.api.DraftTransaction(context.Background(), &commands.DraftTransaction{
 		Config: response.TransactionConfig{
