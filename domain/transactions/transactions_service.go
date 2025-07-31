@@ -144,7 +144,7 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 		tokenChange = &users.TokenOutput{To: userPaymail, Script: tokenChangeScript.String()}
 	}
 
-	draftTransaction, err := walletClient.DraftAndSignTokenTransaction(tokenTransfer, tokenChange, append(tokenUtxos, feeUtxos...), xpriv, metadata)
+	draftTransaction, err := walletClient.DraftAndSignTokenTransaction(tokenTransfer, tokenChange, append(tokenUtxos, feeUtxos...), tokenID, xpriv, metadata)
 	if err != nil {
 		s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
 		return nil, spverrors.ErrCreateTransaction

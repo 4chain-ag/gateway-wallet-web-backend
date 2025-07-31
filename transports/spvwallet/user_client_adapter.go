@@ -28,6 +28,12 @@ import (
 	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 )
 
+type tokenTransactionConfig struct {
+	StablecoinID  string `json:"stablecoinId"`
+	TxOutputs     []int  `json:"txOutputs"`
+	ChangeOutputs []int  `json:"changeOutputs"`
+}
+
 type userClientAdapter struct {
 	api *walletclient.UserAPI
 	log *zerolog.Logger
@@ -260,7 +266,7 @@ func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.
 	}, nil
 }
 
-func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
+func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, stablecoinID, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
 	if len(utxos) == 0 || tokenTransfer == nil {
 		return nil, errors.New("missing token data or utxos")
 	}
@@ -282,13 +288,23 @@ func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenCha
 		},
 	}
 
+	txCfg := tokenTransactionConfig{
+		StablecoinID: stablecoinID,
+		TxOutputs:    []int{0},
+	}
+
 	if tokenChange != nil {
 		outputs = append(outputs, &response.TransactionOutput{
 			To:       tokenChange.To,
 			Satoshis: 1,
 			Script:   tokenChange.Script,
 		})
+
+		txCfg.ChangeOutputs = []int{1}
 	}
+
+	metadata["isTokenTransaction"] = true
+	metadata["tokenTransactionConfig"] = txCfg
 
 	draft, err := u.api.DraftTransaction(context.Background(), &commands.DraftTransaction{
 		Config: response.TransactionConfig{
