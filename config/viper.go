@@ -100,4 +100,5 @@ func setCacheDefaults() {
 
 func setTokenDefaults() {
 	viper.SetDefault(EnvTokenOverlayURL, "http://localhost:3091")
+	viper.SetDefault(EnvTokenOverlayAPIVersion, "v2")
 }
