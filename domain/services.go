@@ -24,8 +24,8 @@ type Services struct {
 }
 
 // NewServices creates services instance.
-func NewServices(usersRepo *db_users.Repository, log *zerolog.Logger, overlay *overlayApi.Client) (*Services, error) {
-	walletClientFactory := spvwallet.NewWalletClientFactory(log, overlay)
+func NewServices(usersRepo *db_users.Repository, log *zerolog.Logger, overlay *overlayApi.Client, overlayAPIVersion spvwallet.APIVersion) (*Services, error) {
+	walletClientFactory := spvwallet.NewWalletClientFactory(log, overlay, overlayAPIVersion)
 	adminWalletClient, err := walletClientFactory.CreateAdminClient()
 	if err != nil {
 		return nil, errors.Wrap(err, "internal error")

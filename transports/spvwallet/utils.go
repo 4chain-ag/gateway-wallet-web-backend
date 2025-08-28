@@ -5,14 +5,14 @@ import (
 	"strings"
 
 	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
-	"github.com/bitcoin-sv/go-sdk/chainhash"
-	bip32 "github.com/bitcoin-sv/go-sdk/compat/bip32"
-	"github.com/bitcoin-sv/go-sdk/script"
-	"github.com/bitcoin-sv/go-sdk/transaction"
-	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
-	sighash "github.com/bitcoin-sv/go-sdk/transaction/sighash"
-	"github.com/bitcoin-sv/go-sdk/transaction/template/p2pkh"
 	"github.com/bitcoin-sv/spv-wallet/models/response"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
+	bip32 "github.com/bsv-blockchain/go-sdk/compat/bip32"
+	"github.com/bsv-blockchain/go-sdk/script"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	sdkTx "github.com/bsv-blockchain/go-sdk/transaction"
+	sighash "github.com/bsv-blockchain/go-sdk/transaction/sighash"
+	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 )
 
 func spvUtxosToUtxos(src []*response.Utxo) ([]*transaction.UTXO, error) {
@@ -51,8 +51,11 @@ func isEF(hex string) bool {
 }
 
 func getStableCoinValue(txID string, tx *sdkTx.Transaction) *bsv21.TokenOperation {
-	// Assumption: The first output token is the transferred value, others are treated as the remainder.
+	// Assumption: First unique tokens in outputs are transaction tokens sent to the recipient
+	// If any token after it's first been seen repeats itself it is a reminder send to the sender
 	// Someday, somehow, maybe this can be handled better, though I doubt it.
+	seenTokens := make(map[bsv21.TokenID]bool)
+	var result *bsv21.TokenOperation
 
 	for vout, out := range tx.Outputs {
 		ins, _ := bsv21.FindInscription(out.LockingScript)
@@ -63,11 +66,33 @@ func getStableCoinValue(txID string, tx *sdkTx.Transaction) *bsv21.TokenOperatio
 				continue
 			}
 
-			return ttxo
+			if vout == 0 {
+				// assign only first ttxo as our result as the data should be the same for all of them and only amount should be different
+				result = &bsv21.TokenOperation{
+					ID:        ttxo.ID,
+					Amount:    0,
+					Symbol:    ttxo.Symbol,
+					Decimals:  ttxo.Decimals,
+					Icon:      ttxo.Icon,
+					Meta:      ttxo.Meta,
+					Operation: ttxo.Operation,
+					SrcTxID:   ttxo.SrcTxID,
+					SrcVout:   ttxo.SrcVout,
+				}
+			}
+
+			if result != nil {
+				// I assume if the token was already seen in outputs it means its a reminder
+				_, alreadySeen := seenTokens[ttxo.ID]
+				if !alreadySeen {
+					seenTokens[ttxo.ID] = true
+					result.Amount += ttxo.Amount
+				}
+			}
 		}
 	}
 
-	return nil
+	return result
 }
 
 func signTransactionEF(draft *response.DraftTransaction, xPriv string) (efHex string, err error) {

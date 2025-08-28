@@ -2,12 +2,13 @@ package users
 
 import (
 	"context"
+	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
 	"time"
 
-	"github.com/bitcoin-sv/go-sdk/transaction"
 	"github.com/bitcoin-sv/spv-wallet-go-client/commands"
 	"github.com/bitcoin-sv/spv-wallet/models"
 	"github.com/bitcoin-sv/spv-wallet/models/filter"
+	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/libsv/go-bk/bip32"
 )
 
@@ -78,7 +79,7 @@ type (
 		GetTransactionsCount() (int64, error)
 		CreateAndFinalizeTransaction(recipients []*commands.Recipients, metadata map[string]any) (DraftTransaction, error)
 		DraftAndSignClassicTransaction(utxos []*transaction.UTXO, recipient string, amount uint64, metadata map[string]any) (DraftTransaction, error)
-		DraftAndSignTokenTransaction(tokenTransfer, tokenChange *TokenOutput, utxos []*transaction.UTXO, stablecoinID, xpriv string, metadata map[string]any) (DraftTransaction, error)
+		DraftAndSignTokenTransaction(tokenOutputs []*TokenOutput, inputs []*transaction.UTXO, outputsIndexes []int, changeIndexes []int, stablecoinID, xpriv string, metadata map[string]any) (DraftTransaction, error)
 		RecordTransaction(hex, draftTxID string, metadata map[string]any) (*models.Transaction, error)
 		// Contacts methods
 		UpsertContact(ctx context.Context, paymail, fullName, requesterPaymail string, metadata map[string]any) (*models.Contact, error)
@@ -88,6 +89,9 @@ type (
 		GetContacts(ctx context.Context, conditions *filter.ContactFilter, metadata map[string]any, queryParams *filter.QueryParams) (*models.SearchContactsResponse, error)
 		GenerateTotpForContact(contact *models.Contact, period, digits uint) (string, error)
 		GetBalance() (*Balance, error)
+
+		GetStablecoinWithSeries(ctx context.Context, assetId string) (*overlayApi.GetStablecoinResponse, error)
+		GetStablecoinWithSeriesByTokenID(ctx context.Context, tokenID string) (*overlayApi.GetStablecoinResponse, error)
 	}
 
 	// AdminWalletClient defines methods which are available for an admin with admin key.

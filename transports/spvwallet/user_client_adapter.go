@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
 
 	walletclient "github.com/bitcoin-sv/spv-wallet-go-client"
@@ -21,8 +22,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/viper"
 
-	"github.com/bitcoin-sv/go-sdk/transaction"
-	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	sdkTx "github.com/bsv-blockchain/go-sdk/transaction"
 
 	overlayApi "github.com/4chain-AG/gateway-overlay/pkg/open_api"
 	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
@@ -34,13 +35,21 @@ type tokenTransactionConfig struct {
 	ChangeOutputs []int  `json:"changeOutputs"`
 }
 
+type APIVersion int
+
+const (
+	APIV1 APIVersion = iota
+	APIV2
+)
+
 type userClientAdapter struct {
 	api *walletclient.UserAPI
 	log *zerolog.Logger
 
 	// I know it's not best place for the client, but I don't want to refactor whole project
-	overlay     *overlayApi.Client
-	knownTokens sync.Map
+	overlay           *overlayApi.Client
+	overlayAPIVersion APIVersion
+	knownTokens       sync.Map
 }
 
 func (u *userClientAdapter) CreateAccessKey() (users.AccKey, error) {
@@ -90,8 +99,8 @@ func (u *userClientAdapter) GetXPub() (users.PubKey, error) {
 	return &XPub{ID: xpub.ID, CurrentBalance: xpub.CurrentBalance}, nil
 }
 
-func (c *userClientAdapter) GetUTXOs(ctx context.Context) ([]*transaction.UTXO, error) {
-	spvUtxos, err := c.api.UTXOs(ctx)
+func (u *userClientAdapter) GetUTXOs(ctx context.Context) ([]*transaction.UTXO, error) {
+	spvUtxos, err := u.api.UTXOs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +250,7 @@ func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.
 		Config: response.TransactionConfig{
 			FromUtxos: utxoPointers,
 			Outputs: []*response.TransactionOutput{
-				&response.TransactionOutput{
+				{
 					To:       recipient,
 					Satoshis: amount,
 				},
@@ -266,41 +275,33 @@ func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.
 	}, nil
 }
 
-func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenTransfer, tokenChange *users.TokenOutput, utxos []*transaction.UTXO, stablecoinID, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
-	if len(utxos) == 0 || tokenTransfer == nil {
+func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenOutputs []*users.TokenOutput, inputs []*transaction.UTXO, outputsIndexes []int, changeIndexes []int, stablecoinID, xpriv string, metadata map[string]any) (users.DraftTransaction, error) {
+	if len(tokenOutputs) == 0 || len(inputs) == 0 {
 		return nil, errors.New("missing token data or utxos")
 	}
 
-	utxoPointers := make([]*response.UtxoPointer, len(utxos))
+	utxoPointers := make([]*response.UtxoPointer, len(inputs))
 
-	for i, u := range utxos {
+	for i, u := range inputs {
 		utxoPointers[i] = &response.UtxoPointer{
 			TransactionID: u.TxID.String(),
 			OutputIndex:   u.Vout,
 		}
 	}
 
-	outputs := []*response.TransactionOutput{
-		{
-			To:       tokenTransfer.To,
+	outputs := make([]*response.TransactionOutput, 0, len(tokenOutputs))
+	for _, output := range tokenOutputs {
+		outputs = append(outputs, &response.TransactionOutput{
+			To:       output.To,
 			Satoshis: 1,
-			Script:   tokenTransfer.Script,
-		},
+			Script:   output.Script,
+		})
 	}
 
 	txCfg := tokenTransactionConfig{
-		StablecoinID: stablecoinID,
-		TxOutputs:    []int{0},
-	}
-
-	if tokenChange != nil {
-		outputs = append(outputs, &response.TransactionOutput{
-			To:       tokenChange.To,
-			Satoshis: 1,
-			Script:   tokenChange.Script,
-		})
-
-		txCfg.ChangeOutputs = []int{1}
+		StablecoinID:  stablecoinID,
+		TxOutputs:     outputsIndexes,
+		ChangeOutputs: changeIndexes,
 	}
 
 	metadata["isTokenTransaction"] = true
@@ -473,30 +474,49 @@ func (u *userClientAdapter) GetBalance() (*users.Balance, error) {
 	userBalance.Satoshis = balance[""]
 	userBalance.Bsv = float64(userBalance.Satoshis) / 100000000
 
+	symbolBalance := make(map[string]*users.StablecoinBalance)
+
 	// find stablecoin symbol for tokenID
 	for tokenID, amount := range balance {
 		if tokenID == "" {
 			continue
 		}
 
-		token, err := u.getKnownToken(context.Background(), tokenID)
+		symbol := tokenID
+		dec := uint8(0)
+		stablecoin, err := u.getKnownCoinByTokenID(context.Background(), tokenID)
 		if err != nil {
 			u.log.Error().Msgf("Failed to get token symbol: %v", err.Error())
 			return nil, err
 		}
+		if stablecoin == nil || stablecoin.AssetId == nil {
+			continue
+		}
 
-		userBalance.Stablecoins = append(userBalance.Stablecoins, &users.StablecoinBalance{
-			TokenID:  tokenID,
-			Symbol:   *token.Symbol,
-			Amount:   amount,
-			Decimals: uint8(token.Decimals), //nolint: gosec
-		})
+		if stablecoin.Symbol != nil {
+			symbol = *stablecoin.Symbol
+		}
+
+		if stablecoin.Decimals != nil {
+			dec = uint8(*stablecoin.Decimals)
+		}
+
+		stablecoinBalance, ok := symbolBalance[symbol]
+		if !ok {
+			symbolBalance[symbol] = &users.StablecoinBalance{Amount: amount, Decimals: dec, TokenID: *stablecoin.AssetId, Symbol: symbol}
+		} else {
+			stablecoinBalance.Amount += amount
+		}
+	}
+
+	for _, symBalance := range symbolBalance {
+		userBalance.Stablecoins = append(userBalance.Stablecoins, symBalance)
 	}
 
 	return userBalance, nil
 }
 
-func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string, overlay *overlayApi.Client) (*userClientAdapter, error) {
+func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string, overlay *overlayApi.Client, overlayAPIVersion APIVersion) (*userClientAdapter, error) {
 	serverURL := viper.GetString(config.EnvServerURL)
 	api, err := walletclient.NewUserAPIWithXPriv(walletclientCfg.New(walletclientCfg.WithAddr(serverURL)), xPriv)
 	if err != nil {
@@ -504,13 +524,14 @@ func newUserClientAdapterWithXPriv(log *zerolog.Logger, xPriv string, overlay *o
 	}
 
 	return &userClientAdapter{
-		api:     api,
-		log:     log,
-		overlay: overlay,
+		api:               api,
+		log:               log,
+		overlay:           overlay,
+		overlayAPIVersion: overlayAPIVersion,
 	}, nil
 }
 
-func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, overlay *overlayApi.Client) (*userClientAdapter, error) {
+func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, overlay *overlayApi.Client, overlayAPIVersion APIVersion) (*userClientAdapter, error) {
 	serverURL := viper.GetString(config.EnvServerURL)
 	api, err := walletclient.NewUserAPIWithAccessKey(walletclientCfg.New(walletclientCfg.WithAddr(serverURL)), accessKey)
 	if err != nil {
@@ -518,9 +539,10 @@ func newUserClientAdapterWithAccessKey(log *zerolog.Logger, accessKey string, ov
 	}
 
 	return &userClientAdapter{
-		api:     api,
-		log:     log,
-		overlay: overlay,
+		api:               api,
+		log:               log,
+		overlay:           overlay,
+		overlayAPIVersion: overlayAPIVersion,
 	}, nil
 }
 
@@ -532,13 +554,13 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	if isEF(transaction.Hex) {
 		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
 		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
-			token, err := u.getKnownToken(context.Background(), ttxo.ID)
+			token, err := u.getKnownCoinByTokenID(context.Background(), string(ttxo.ID))
 			if err != nil {
 				return "", 0, 0, err
 			}
 
 			symbol = *token.Symbol
-			dec = uint8(token.Decimals) //nolint: gosec
+			dec = uint8(*token.Decimals) //nolint: gosec
 			amount = ttxo.Amount
 		}
 	}
@@ -546,13 +568,37 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	return symbol, amount, dec, nil
 }
 
-func (u *userClientAdapter) getKnownToken(ctx context.Context, tokenID string) (*overlayApi.GetTokenResponse, error) {
-	knownToken, ok := u.knownTokens.Load(tokenID)
+func (u *userClientAdapter) getKnownToken(ctx context.Context, assetID string) (*overlayApi.GetStablecoinResponse, error) {
+	knownToken, ok := u.knownTokens.Load(assetID)
 	if ok {
-		return knownToken.(*overlayApi.GetTokenResponse), nil //nolint: errcheck
+		return knownToken.(*overlayApi.GetStablecoinResponse), nil //nolint: errcheck
 	}
 
-	token, err := u.getBsv21Token(ctx, tokenID)
+	token, err := u.GetStablecoinWithSeries(ctx, assetID)
+	if err != nil {
+		return nil, err
+	}
+
+	if token == nil || token.Symbol == nil {
+		u.log.Warn().Ctx(ctx).
+			Str("assetID", assetID).
+			Msg("Unknown token with no symbol")
+		return &overlayApi.GetStablecoinResponse{
+			Symbol: &assetID, // use assetID as currency symbol for unknown tokens
+		}, nil
+	}
+
+	u.knownTokens.Store(assetID, token)
+	return token, nil
+}
+
+func (u *userClientAdapter) getKnownCoinByTokenID(ctx context.Context, tokenID string) (*overlayApi.GetStablecoinResponse, error) {
+	knownToken, ok := u.knownTokens.Load(tokenID)
+	if ok {
+		return knownToken.(*overlayApi.GetStablecoinResponse), nil //nolint: errcheck
+	}
+
+	token, err := u.GetStablecoinWithSeriesByTokenID(ctx, tokenID)
 	if err != nil {
 		return nil, err
 	}
@@ -561,16 +607,158 @@ func (u *userClientAdapter) getKnownToken(ctx context.Context, tokenID string) (
 		u.log.Warn().Ctx(ctx).
 			Str("tokenID", tokenID).
 			Msg("Unknown token with no symbol")
-		return &overlayApi.GetTokenResponse{
+		return &overlayApi.GetStablecoinResponse{
 			Symbol: &tokenID, // use tokenID as currency symbol for unknown tokens
 		}, nil
 	}
 
-	u.knownTokens.Store(token.Id, token)
+	u.knownTokens.Store(tokenID, token)
 	return token, nil
 }
 
-func (u *userClientAdapter) getBsv21Token(ctx context.Context, tokenID string) (*overlayApi.GetTokenResponse, error) {
+func (u *userClientAdapter) GetStablecoinWithSeriesByTokenID(ctx context.Context, tokenID string) (*overlayApi.GetStablecoinResponse, error) {
+	var token *overlayApi.GetStablecoinResponse
+	var err error
+
+	kt, ok := u.knownTokens.Load(tokenID)
+	if ok {
+		return kt.(*overlayApi.GetStablecoinResponse), nil //nolint: errcheck
+	}
+
+	if u.overlayAPIVersion == APIV1 {
+		token, err = u.getBsv21Token(ctx, tokenID)
+	} else {
+		token, err = u.getV2CoinByTokenID(ctx, tokenID)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	if token != nil && token.Symbol != nil {
+		u.knownTokens.Store(tokenID, token)
+		if token.Series != nil {
+			for _, seriesID := range *token.Series {
+				u.knownTokens.Store(seriesID, token)
+			}
+		}
+	}
+
+	return token, nil
+}
+
+func (u *userClientAdapter) GetStablecoinWithSeries(ctx context.Context, assetID string) (*overlayApi.GetStablecoinResponse, error) {
+	var token *overlayApi.GetStablecoinResponse
+	var err error
+
+	kt, ok := u.knownTokens.Load(assetID)
+	if ok {
+		return kt.(*overlayApi.GetStablecoinResponse), nil //nolint: errcheck
+	}
+
+	if u.overlayAPIVersion == APIV1 {
+		token, err = u.getBsv21Token(ctx, assetID)
+	} else {
+		token, err = u.getV2CoinByAssetID(ctx, assetID)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	if token != nil && token.Symbol != nil {
+		u.knownTokens.Store(token.AssetId, token)
+		if token.Series != nil {
+			for _, seriesID := range *token.Series {
+				u.knownTokens.Store(seriesID, token)
+			}
+		}
+	}
+
+	return token, nil
+}
+
+func (u *userClientAdapter) getV2CoinByAssetID(ctx context.Context, assetID string) (*overlayApi.GetStablecoinResponse, error) {
+	resp, err := u.overlay.GetApiV2CoinAssetId(ctx, assetID)
+	if err != nil {
+		u.log.Error().Ctx(ctx).Err(err).Msg("Failed connect with overlay service")
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var payload []byte
+		payload, err = io.ReadAll(resp.Body)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed read response - v2")
+			return nil, err
+		}
+
+		res := new(overlayApi.GetStablecoinResponse)
+		err = json.Unmarshal(payload, res)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed unmarshall response - v2")
+			return nil, err
+		}
+
+		return res, nil
+
+	case http.StatusNotFound:
+		u.log.Warn().Ctx(ctx).Msg("Token not found")
+		return nil, nil
+	default:
+		errorBody, _ := io.ReadAll(resp.Body)
+		err = errors.New(string(errorBody))
+
+		u.log.Error().Ctx(ctx).
+			Err(err).
+			Int("status-code", resp.StatusCode).
+			Msg("Failed get token from overlay service")
+		return nil, err
+	}
+}
+
+func (u *userClientAdapter) getV2CoinByTokenID(ctx context.Context, tokenID string) (*overlayApi.GetStablecoinResponse, error) {
+	resp, err := u.overlay.GetApiV2CoinTokenTokenId(ctx, tokenID)
+	if err != nil {
+		u.log.Error().Ctx(ctx).Err(err).Msg("Failed connect with overlay service")
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var payload []byte
+		payload, err = io.ReadAll(resp.Body)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed read response - v2")
+			return nil, err
+		}
+
+		res := new(overlayApi.GetStablecoinResponse)
+		err = json.Unmarshal(payload, res)
+		if err != nil {
+			u.log.Error().Ctx(ctx).Err(err).Msg("Failed unmarshall response - v2")
+			return nil, err
+		}
+
+		return res, nil
+
+	case http.StatusNotFound:
+		u.log.Warn().Ctx(ctx).Msg("Token not found")
+		return nil, nil
+	default:
+		errorBody, _ := io.ReadAll(resp.Body)
+		err = errors.New(string(errorBody))
+
+		u.log.Error().Ctx(ctx).
+			Err(err).
+			Int("status-code", resp.StatusCode).
+			Msg("Failed get token from overlay service")
+		return nil, err
+	}
+}
+
+func (u *userClientAdapter) getBsv21Token(ctx context.Context, tokenID string) (*overlayApi.GetStablecoinResponse, error) {
 	resp, err := u.overlay.GetApiV1Bsv21TokenId(ctx, tokenID)
 	if err != nil {
 		u.log.Error().Ctx(ctx).Err(err).Msg("Failed connect with overlay service")
@@ -595,7 +783,11 @@ func (u *userClientAdapter) getBsv21Token(ctx context.Context, tokenID string) (
 			return nil, err
 		}
 
-		return res, nil
+		return &overlayApi.GetStablecoinResponse{
+			AssetId:  &res.Id,
+			Symbol:   res.Symbol,
+			Decimals: &res.Decimals,
+		}, nil
 
 	case 404:
 		u.log.Warn().Ctx(ctx).Msg("Token not found")

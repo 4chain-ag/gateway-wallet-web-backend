@@ -90,7 +90,8 @@ const (
 
 const (
 	// EnvTokenOverlayURL defines the url address of token overlay service.
-	EnvTokenOverlayURL = "token.overlay.url" // #nosec G101
+	EnvTokenOverlayURL        = "token.overlay.url"         // #nosec G101
+	EnvTokenOverlayAPIVersion = "token.overlay.api.version" // #nosec G101
 )
 
 // Config returns strongly typed config values.
