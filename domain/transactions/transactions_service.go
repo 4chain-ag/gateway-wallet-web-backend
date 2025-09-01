@@ -122,8 +122,8 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 	// Get coin inputs for the transfer
 	inputs := s.coinInputs(tokenTtxos)
 
-	neededSatoshi := uint64(satoshisNeededForTransfer) + uint64(len(outputs))
-	inputSato := uint64(len(inputs)) // I assume they're valid 1Sat
+	neededSatoshi := uint64(satoshisNeededForTransfer) + uint64(len(outputs)) + 2 // adding 2 for additional situation if tokens include fee to stablecoin issuer
+	inputSato := uint64(len(inputs))                                              // I assume they're valid 1Sat
 
 	var satoUtxos []*transaction.UTXO
 	if inputSato < neededSatoshi {
@@ -169,13 +169,13 @@ func (s *TransactionService) GetTransaction(accessKey, id, userPaymail string) (
 		return nil, spverrors.ErrGetTransaction.Wrap(err)
 	}
 
-	transaction, err := userWalletClient.GetTransaction(id, userPaymail)
+	tx, err := userWalletClient.GetTransaction(id, userPaymail)
 	if err != nil {
 		s.log.Debug().Msgf("Error during get transaction: %s", err.Error())
 		return nil, spverrors.ErrGetTransaction
 	}
 
-	return transaction, nil
+	return tx, nil
 }
 
 // GetTransactions returns transactions by access key.
@@ -332,6 +332,10 @@ func filterCoinUtxosForCurrentStablecoinTokens(walletClient users.UserWalletClie
 	}
 
 	for _, tokenID := range series {
+		if acc >= amount {
+			// enough tokens
+			break
+		}
 		// check if allCoinsUtxos contain stablecoin token series
 		ttxos, ok := allCoinUtxos[bsv21.TokenID(tokenID)]
 		if !ok {
