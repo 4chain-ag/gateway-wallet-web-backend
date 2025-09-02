@@ -60,6 +60,7 @@ type (
 	DraftTransaction interface {
 		GetDraftTransactionHex() string
 		GetDraftTransactionID() string
+		GetDraftTransactionMetadata() map[string]any
 	}
 
 	// UserWalletClient defines methods which are available for a user with access key.

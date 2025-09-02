@@ -60,7 +60,7 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, un
 	}
 
 	go func() {
-		tx, err := tryRecordTransaction(userWalletClient, draftTransaction, metadata, s.log)
+		tx, err := tryRecordTransaction(userWalletClient, draftTransaction, s.log)
 		if err != nil {
 			events <- notification.PrepareTransactionErrorEvent(err)
 		} else if tx != nil {
@@ -278,9 +278,9 @@ func (s *TransactionService) outputs(tokenUtxos map[bsv21.TokenID][]*tokenengine
 	return outputs, outputIndexes, changeIndexes, nil
 }
 
-func tryRecordTransaction(userWalletClient users.UserWalletClient, draftTx users.DraftTransaction, metadata map[string]any, log *zerolog.Logger) (*models.Transaction, error) {
+func tryRecordTransaction(userWalletClient users.UserWalletClient, draftTx users.DraftTransaction, log *zerolog.Logger) (*models.Transaction, error) {
 	retries := uint(3)
-	tx, recordErr := tryRecord(userWalletClient, draftTx, metadata, log, retries)
+	tx, recordErr := tryRecord(userWalletClient, draftTx, draftTx.GetDraftTransactionMetadata(), log, retries)
 
 	if recordErr != nil {
 		log.Error().

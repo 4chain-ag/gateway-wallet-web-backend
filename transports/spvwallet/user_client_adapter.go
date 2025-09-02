@@ -30,9 +30,11 @@ import (
 )
 
 type tokenTransactionConfig struct {
-	StablecoinID  string `json:"stablecoinId"`
-	TxOutputs     []int  `json:"txOutputs"`
-	ChangeOutputs []int  `json:"changeOutputs"`
+	StablecoinID   string `json:"stablecoinId"`
+	TxOutputs      []int  `json:"txOutputs"`
+	ChangeOutputs  []int  `json:"changeOutputs"`
+	FinalTxOutputs []int  `json:"finalTxOutputs"`
+	FeeTxOutputs   []int  `json:"feeTxOutputs"`
 }
 
 type APIVersion int
@@ -272,6 +274,7 @@ func (u *userClientAdapter) DraftAndSignClassicTransaction(utxos []*transaction.
 	return &DraftTransaction{
 		TxDraftID: draftTx.ID,
 		TxHex:     hex,
+		Metadata:  metadata,
 	}, nil
 }
 
@@ -326,6 +329,7 @@ func (u *userClientAdapter) DraftAndSignTokenTransaction(tokenOutputs []*users.T
 	return &DraftTransaction{
 		TxDraftID: draft.ID,
 		TxHex:     efHex,
+		Metadata:  draft.Metadata,
 	}, nil
 }
 
@@ -553,7 +557,22 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 
 	if isEF(transaction.Hex) {
 		tx, _ := sdkTx.NewTransactionFromHex(transaction.Hex) // ignore corrupted transactions
-		if ttxo := getStableCoinValue(transaction.ID, tx); ttxo != nil {
+		var outputsIndexes []int
+		var feeIndexes []int
+		metadata := u.mapMetadata(transaction)
+		if metadata != nil {
+			if metadata.FinalTxOutputs != nil {
+				outputsIndexes = metadata.FinalTxOutputs
+			} else if metadata.TxOutputs != nil {
+				outputsIndexes = metadata.TxOutputs
+			}
+
+			if metadata.FeeTxOutputs != nil {
+				feeIndexes = metadata.FeeTxOutputs
+			}
+		}
+
+		if ttxo := getStableCoinValue(transaction.ID, tx, outputsIndexes, feeIndexes, transaction.TransactionDirection); ttxo != nil {
 			token, err := u.getKnownCoinByTokenID(context.Background(), string(ttxo.ID))
 			if err != nil {
 				return "", 0, 0, err
@@ -566,6 +585,42 @@ func (u *userClientAdapter) getTransacionValue(ctx context.Context, transaction 
 	}
 
 	return symbol, amount, dec, nil
+}
+
+func (u *userClientAdapter) mapMetadata(transaction *response.Transaction) *tokenTransactionConfig {
+	jsonBytes, err := json.Marshal(transaction.Metadata["tokenTransactionConfig"])
+	if err != nil {
+		panic(err)
+	}
+
+	var metadata tokenTransactionConfig
+	if err = json.Unmarshal(jsonBytes, &metadata); err != nil {
+		return nil
+	}
+
+	return &metadata
+}
+
+func (u *userClientAdapter) parseMetadataFinalOutputsIndexes(indexes interface{}) []int {
+	var outputsIndexes []int
+	// Attempt to cast to a []interface{} first
+	interfaceSlice, ok := indexes.([]interface{})
+	if !ok {
+		u.log.Warn().Msg("Error: finalTxOutputs is not a slice of interfaces")
+		return outputsIndexes
+	}
+
+	// Iterate and convert each element
+	for _, v := range interfaceSlice {
+		// Type assert each element to an int
+		if num, ok := v.(float64); ok {
+			outputsIndexes = append(outputsIndexes, int(num))
+		} else {
+			u.log.Warn().Msgf("Warning: Found a non-integer value in the slice: %v\n", v)
+		}
+	}
+
+	return outputsIndexes
 }
 
 func (u *userClientAdapter) getKnownToken(ctx context.Context, assetID string) (*overlayApi.GetStablecoinResponse, error) {

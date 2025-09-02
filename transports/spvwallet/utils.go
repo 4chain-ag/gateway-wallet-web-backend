@@ -50,49 +50,61 @@ func isEF(hex string) bool {
 	return len(hex) > 20 && strings.EqualFold(hex[8:20], efMarker)
 }
 
-func getStableCoinValue(txID string, tx *sdkTx.Transaction) *bsv21.TokenOperation {
-	// Assumption: First unique tokens in outputs are transaction tokens sent to the recipient
-	// If any token after it's first been seen repeats itself it is a reminder send to the sender
-	// Someday, somehow, maybe this can be handled better, though I doubt it.
-	seenTokens := make(map[bsv21.TokenID]bool)
-	var result *bsv21.TokenOperation
+func getStableCoinValue(txID string, tx *sdkTx.Transaction, txOutputsIndexes, txFeeIndexes []int, txDirection string) *bsv21.TokenOperation {
+	if len(txOutputsIndexes) == 0 {
+		return nil
+	}
 
-	for vout, out := range tx.Outputs {
-		ins, _ := bsv21.FindInscription(out.LockingScript)
-		if ins != nil {
-			ttxo, err := bsv21.NewFromInscription(txID, uint32(vout), ins) //nolint: gosec
-			if err != nil {
-				// ignore and take next utxo
-				continue
-			}
+	result := processIndexes(txID, tx, txOutputsIndexes)
 
-			if vout == 0 {
-				// assign only first ttxo as our result as the data should be the same for all of them and only amount should be different
-				result = &bsv21.TokenOperation{
-					ID:        ttxo.ID,
-					Amount:    0,
-					Symbol:    ttxo.Symbol,
-					Decimals:  ttxo.Decimals,
-					Icon:      ttxo.Icon,
-					Meta:      ttxo.Meta,
-					Operation: ttxo.Operation,
-					SrcTxID:   ttxo.SrcTxID,
-					SrcVout:   ttxo.SrcVout,
-				}
-			}
-
-			if result != nil {
-				// I assume if the token was already seen in outputs it means its a reminder
-				_, alreadySeen := seenTokens[ttxo.ID]
-				if !alreadySeen {
-					seenTokens[ttxo.ID] = true
-					result.Amount += ttxo.Amount
-				}
-			}
+	if txDirection == "outgoing" {
+		feeToken := processIndexes(txID, tx, txFeeIndexes)
+		if result == nil {
+			result = feeToken
+		} else if feeToken != nil {
+			result.Amount += feeToken.Amount
 		}
 	}
 
 	return result
+}
+
+// A helper function to reduce code duplication
+func processIndexes(txID string, tx *sdkTx.Transaction, indexes []int) *bsv21.TokenOperation {
+	var tokenOp *bsv21.TokenOperation
+	for _, vout := range indexes {
+		if vout >= len(tx.Outputs) || vout < 0 {
+			continue // Skip invalid index
+		}
+
+		ins, _ := bsv21.FindInscription(tx.Outputs[vout].LockingScript)
+		if ins == nil {
+			continue
+		}
+
+		ttxo, err := bsv21.NewFromInscription(txID, uint32(vout), ins)
+		if err != nil {
+			continue // Ignore and take the next utxo
+		}
+
+		if tokenOp == nil {
+			// This assumes all tokens have the same metadata, which is consistent with the original logic.
+			tokenOp = &bsv21.TokenOperation{
+				ID:        ttxo.ID,
+				Amount:    ttxo.Amount,
+				Symbol:    ttxo.Symbol,
+				Decimals:  ttxo.Decimals,
+				Icon:      ttxo.Icon,
+				Meta:      ttxo.Meta,
+				Operation: ttxo.Operation,
+				SrcTxID:   ttxo.SrcTxID,
+				SrcVout:   ttxo.SrcVout,
+			}
+		} else {
+			tokenOp.Amount += ttxo.Amount
+		}
+	}
+	return tokenOp
 }
 
 func signTransactionEF(draft *response.DraftTransaction, xPriv string) (efHex string, err error) {
