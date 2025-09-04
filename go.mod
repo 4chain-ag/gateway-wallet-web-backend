@@ -4,10 +4,8 @@ go 1.24.4
 
 toolchain go1.24.6
 
-replace github.com/4chain-AG/gateway-overlay => ../gateway-overlay
-
 require (
-	github.com/4chain-AG/gateway-overlay v0.21.0
+	github.com/4chain-AG/gateway-overlay v0.22.0
 	github.com/avast/retry-go/v4 v4.6.0
 	github.com/bitcoin-sv/spv-wallet-go-client v1.0.0-beta.23
 	github.com/bitcoin-sv/spv-wallet/models v1.0.0-beta.40
