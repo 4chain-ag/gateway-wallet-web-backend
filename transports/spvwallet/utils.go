@@ -69,7 +69,6 @@ func getStableCoinValue(txID string, tx *sdkTx.Transaction, txOutputsIndexes, tx
 	return result
 }
 
-// A helper function to reduce code duplication
 func processIndexes(txID string, tx *sdkTx.Transaction, indexes []int) *bsv21.TokenOperation {
 	var tokenOp *bsv21.TokenOperation
 	for _, vout := range indexes {
