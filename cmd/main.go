@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"github.com/bitcoin-sv/spv-wallet-web-backend/transports/spvwallet"
 	"net/http"
 	"os"
 	"os/signal"
@@ -43,7 +44,12 @@ func main() {
 
 	overlayClient, _ := overlayApi.NewClient(viper.GetString(config.EnvTokenOverlayURL), overlayApi.WithHTTPClient(http.DefaultClient))
 
-	s, err := domain.NewServices(repo, log, overlayClient)
+	overlayAPIVersion := spvwallet.APIV1
+	if viper.GetString(config.EnvTokenOverlayAPIVersion) != "v1" {
+		overlayAPIVersion = spvwallet.APIV2
+	}
+
+	s, err := domain.NewServices(repo, log, overlayClient, overlayAPIVersion)
 	if err != nil {
 		log.Error().Msgf("cannot create services because of an error: %v", err)
 		os.Exit(1)

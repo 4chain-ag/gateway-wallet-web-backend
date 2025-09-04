@@ -6,9 +6,12 @@ import (
 	"math"
 	"time"
 
+	"github.com/avast/retry-go/v4"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	"github.com/pkg/errors"
+
 	tokenengine "github.com/4chain-AG/gateway-overlay/pkg/token_engine"
 	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
-	"github.com/avast/retry-go/v4"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/domain/users"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/notification"
 	"github.com/bitcoin-sv/spv-wallet-web-backend/spverrors"
@@ -45,22 +48,19 @@ func (s *TransactionService) CreateTransaction(userPaymail, xpriv, recipient, un
 	if err != nil {
 		return spverrors.ErrCreateTransaction.Wrap(err)
 	}
-
 	var draftTransaction users.DraftTransaction
 	metadata := map[string]any{"receiver": recipient, "sender": userPaymail}
-
 	if unit == satoshiUnit {
 		draftTransaction, err = s.prepareClassicTransaction(userWalletClient, recipient, amount, metadata)
 	} else {
 		draftTransaction, err = s.prepareTokenTransaction(userWalletClient, userPaymail, xpriv, recipient, unit, amount, metadata)
 	}
-
 	if err != nil {
 		return err
 	}
 
 	go func() {
-		tx, err := tryRecordTransaction(userWalletClient, draftTransaction, metadata, s.log)
+		tx, err := tryRecordTransaction(userWalletClient, draftTransaction, s.log)
 		if err != nil {
 			events <- notification.PrepareTransactionErrorEvent(err)
 		} else if tx != nil {
@@ -104,47 +104,42 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 		return nil, spverrors.ErrGetXPub
 	}
 
-	tokenUtxos, tokenAmount, err := tokenengine.GetBsv21Utxos(tokenID, utxos, amount)
+	// Get bsv21 tokens UTXOs
+	allCoinsUtxos := tokenengine.GetAllBsv21Ttxos(utxos)
+	tokenTtxos, tokenValue, err := filterCoinUtxosForCurrentStablecoinTokens(walletClient, allCoinsUtxos, amount, tokenID)
 	if err != nil {
-		if err == tokenengine.ErrNotEnoughTokenUTXOs {
-			return nil, spverrors.ErrNotEnoughTokenUTXOs
-		}
+		return nil, err
+	}
+	if tokenValue < amount {
+		return nil, tokenengine.ErrNotEnoughTokenUTXOs
+	}
+
+	outputs, outputsIndexes, changeIndexes, err := s.outputs(tokenTtxos, recipient, userPaymail, amount)
+	if err != nil {
 		return nil, err
 	}
 
-	satAmount := uint64(satoshisNeededForTransfer)
-	changeAmount := uint64(0)
-	if tokenAmount > amount {
-		// we need one more sat for token change
-		satAmount++
-		changeAmount = tokenAmount - amount
-	}
+	// Get coin inputs for the transfer
+	inputs := s.coinInputs(tokenTtxos)
 
-	feeUtxos, err := tokenengine.GetClassicUtxos(utxos, satAmount)
-	if err != nil {
-		if err == tokenengine.ErrNotEnoughUTXOs {
-			return nil, spverrors.ErrNotEnoughUTXOs
-		}
-		return nil, err
-	}
+	neededSatoshi := uint64(satoshisNeededForTransfer) + uint64(len(outputs)) + 2 // adding 2 for additional situation if tokens include fee to stablecoin issuer
+	inputSato := uint64(len(inputs))                                              // I assume they're valid 1Sat
 
-	sendScript, err := bsv21.NewBsv21Transfer(tokenID, amount)
-	if err != nil {
-		return nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
-	}
-
-	tokenTransfer := &users.TokenOutput{To: recipient, Script: sendScript.String()}
-
-	var tokenChange *users.TokenOutput
-	if changeAmount > 0 {
-		tokenChangeScript, err := bsv21.NewBsv21Transfer(tokenID, changeAmount)
+	var satoUtxos []*transaction.UTXO
+	if inputSato < neededSatoshi {
+		// get  missing satoshis from the operator wallet
+		satoUtxos, err = tokenengine.GetClassicUtxos(utxos, neededSatoshi-inputSato)
 		if err != nil {
-			return nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
+			if errors.Is(err, tokenengine.ErrNotEnoughUTXOs) {
+				return nil, spverrors.ErrNotEnoughUTXOs
+			}
+			return nil, err
 		}
-		tokenChange = &users.TokenOutput{To: userPaymail, Script: tokenChangeScript.String()}
 	}
 
-	draftTransaction, err := walletClient.DraftAndSignTokenTransaction(tokenTransfer, tokenChange, append(tokenUtxos, feeUtxos...), tokenID, xpriv, metadata)
+	inputs = append(inputs, satoUtxos...)
+
+	draftTransaction, err := walletClient.DraftAndSignTokenTransaction(outputs, inputs, outputsIndexes, changeIndexes, tokenID, xpriv, metadata)
 	if err != nil {
 		s.log.Debug().Msgf("Error during create transaction: %s", err.Error())
 		return nil, spverrors.ErrCreateTransaction
@@ -152,6 +147,18 @@ func (s *TransactionService) prepareTokenTransaction(walletClient users.UserWall
 
 	s.log.Debug().Any("draftTx", draftTransaction).Msg("Token tx")
 	return draftTransaction, nil
+}
+
+func (s *TransactionService) coinInputs(tokenTtxos map[bsv21.TokenID][]*tokenengine.Bsv21TTXO) []*transaction.UTXO {
+	coinInputs := make([]*transaction.UTXO, 0)
+
+	for _, ttxos := range tokenTtxos {
+		for _, t := range ttxos {
+			coinInputs = append(coinInputs, t.Utxo)
+		}
+	}
+
+	return coinInputs
 }
 
 // GetTransaction returns transaction by id.
@@ -162,13 +169,13 @@ func (s *TransactionService) GetTransaction(accessKey, id, userPaymail string) (
 		return nil, spverrors.ErrGetTransaction.Wrap(err)
 	}
 
-	transaction, err := userWalletClient.GetTransaction(id, userPaymail)
+	tx, err := userWalletClient.GetTransaction(id, userPaymail)
 	if err != nil {
 		s.log.Debug().Msgf("Error during get transaction: %s", err.Error())
 		return nil, spverrors.ErrGetTransaction
 	}
 
-	return transaction, nil
+	return tx, nil
 }
 
 // GetTransactions returns transactions by access key.
@@ -203,9 +210,77 @@ func (s *TransactionService) GetTransactions(accessKey, userPaymail string, quer
 	return pTransactions, nil
 }
 
-func tryRecordTransaction(userWalletClient users.UserWalletClient, draftTx users.DraftTransaction, metadata map[string]any, log *zerolog.Logger) (*models.Transaction, error) {
+func (s *TransactionService) outputs(tokenUtxos map[bsv21.TokenID][]*tokenengine.Bsv21TTXO, recipient, sender string, amount uint64) ([]*users.TokenOutput, []int, []int, error) {
+	outputs := make([]*users.TokenOutput, 0, len(tokenUtxos))
+	outputIndexes := make([]int, 0)
+	changeIndexes := make([]int, 0)
+
+	remainingToSend := amount
+	tokensForTransfer := make(map[bsv21.TokenID]uint64) // How much of each token to send
+	tokensForChange := make(map[bsv21.TokenID]uint64)   // How much of each token to keep as change
+
+	for tokenID, ttxos := range tokenUtxos {
+		tokenTotal := uint64(0)
+		for _, ttxo := range ttxos {
+			tokenTotal += ttxo.Amount
+		}
+
+		if remainingToSend > 0 {
+			if remainingToSend >= tokenTotal {
+				tokensForTransfer[tokenID] = tokenTotal
+				remainingToSend -= tokenTotal
+			} else {
+				tokensForTransfer[tokenID] = remainingToSend
+				tokensForChange[tokenID] = tokenTotal - remainingToSend
+				remainingToSend = 0
+			}
+		} else {
+			tokensForChange[tokenID] = tokenTotal
+		}
+
+		if transferAmount, exists := tokensForTransfer[tokenID]; exists {
+			if tokenTotal > transferAmount {
+				tokensForChange[tokenID] = tokenTotal - transferAmount
+			}
+		}
+	}
+
+	outputIndex := 0 // This tracks the actual position in outputs array
+	// Create transfer outputs
+	for tokenID, amt := range tokensForTransfer {
+		if amt > 0 {
+			transferScript, err := bsv21.NewBsv21Transfer(tokenID, amt)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
+			}
+			transfer := &users.TokenOutput{To: recipient, Script: transferScript.String()}
+			outputs = append(outputs, transfer)                // Add to position outputIndex
+			outputIndexes = append(outputIndexes, outputIndex) // Record this position
+			outputIndex++                                      // Increment for next output
+		}
+	}
+
+	// Create change outputs
+	for tokenID, amt := range tokensForChange {
+		if amt > 0 {
+			transferScript, err := bsv21.NewBsv21Transfer(tokenID, amt)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("failed preparing token transfer inscription: %w", err)
+			}
+			changeTransfer := &users.TokenOutput{To: sender, Script: transferScript.String()}
+			outputs = append(outputs, changeTransfer)          // Add to position outputIndex
+			changeIndexes = append(changeIndexes, outputIndex) // Record this position
+			outputIndex++                                      // Increment for next output
+		}
+	}
+
+	// SPV Wallet will handle sato change automagically.
+	return outputs, outputIndexes, changeIndexes, nil
+}
+
+func tryRecordTransaction(userWalletClient users.UserWalletClient, draftTx users.DraftTransaction, log *zerolog.Logger) (*models.Transaction, error) {
 	retries := uint(3)
-	tx, recordErr := tryRecord(userWalletClient, draftTx, metadata, log, retries)
+	tx, recordErr := tryRecord(userWalletClient, draftTx, draftTx.GetDraftTransactionMetadata(), log, retries)
 
 	if recordErr != nil {
 		log.Error().
@@ -241,4 +316,48 @@ func tryRecord(userWalletClient users.UserWalletClient, draftTx users.DraftTrans
 		}),
 	)
 	return tx, err //nolint:wrapcheck // error wrapped higher in call stack
+}
+
+func filterCoinUtxosForCurrentStablecoinTokens(walletClient users.UserWalletClient, allCoinUtxos map[bsv21.TokenID][]*tokenengine.Bsv21TTXO, amount uint64, stablecoinID string) (map[bsv21.TokenID][]*tokenengine.Bsv21TTXO, uint64, error) {
+	filteredUtxos := make(map[bsv21.TokenID][]*tokenengine.Bsv21TTXO)
+	acc := uint64(0)
+
+	coin, err := walletClient.GetStablecoinWithSeries(context.Background(), stablecoinID)
+	if err != nil {
+		return nil, 0, err
+	}
+	series := []string{*coin.AssetId}
+	if coin.Series != nil {
+		series = *coin.Series
+	}
+
+	for _, tokenID := range series {
+		if acc >= amount {
+			// enough tokens
+			break
+		}
+		// check if allCoinsUtxos contain stablecoin token series
+		ttxos, ok := allCoinUtxos[bsv21.TokenID(tokenID)]
+		if !ok {
+			continue
+		}
+
+		group, found := filteredUtxos[bsv21.TokenID(tokenID)]
+		if !found {
+			group = make([]*tokenengine.Bsv21TTXO, 0)
+		}
+
+		for _, utxo := range ttxos {
+			group = append(group, utxo)
+			acc += utxo.Amount
+			if acc >= amount {
+				// enough tokens
+				break
+			}
+		}
+
+		filteredUtxos[bsv21.TokenID(tokenID)] = group
+	}
+
+	return filteredUtxos, acc, nil
 }

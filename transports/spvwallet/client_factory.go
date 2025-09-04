@@ -7,16 +7,18 @@ import (
 )
 
 type walletClientFactory struct {
-	log     *zerolog.Logger
-	overlay *overlayApi.Client
+	log               *zerolog.Logger
+	overlay           *overlayApi.Client
+	overlayAPIVersion APIVersion
 }
 
 // NewWalletClientFactory implements the ClientFactory.
-func NewWalletClientFactory(log *zerolog.Logger, overlay *overlayApi.Client) users.WalletClientFactory {
+func NewWalletClientFactory(log *zerolog.Logger, overlay *overlayApi.Client, overlayAPIVersion APIVersion) users.WalletClientFactory {
 	logger := log.With().Str("service", "spv-wallet-client").Logger()
 	return &walletClientFactory{
-		log:     &logger,
-		overlay: overlay,
+		log:               &logger,
+		overlay:           overlay,
+		overlayAPIVersion: overlayAPIVersion,
 	}
 }
 
@@ -27,10 +29,10 @@ func (bf *walletClientFactory) CreateAdminClient() (users.AdminWalletClient, err
 
 // CreateWithXpriv returns UserWalletClient as spv-wallet-go-client instance with given xpriv.
 func (bf *walletClientFactory) CreateWithXpriv(xpriv string) (users.UserWalletClient, error) {
-	return newUserClientAdapterWithXPriv(bf.log, xpriv, bf.overlay)
+	return newUserClientAdapterWithXPriv(bf.log, xpriv, bf.overlay, bf.overlayAPIVersion)
 }
 
 // CreateWithAccessKey returns UserWalletClient as spv-wallet-go-client instance with given access key.
 func (bf *walletClientFactory) CreateWithAccessKey(accessKey string) (users.UserWalletClient, error) {
-	return newUserClientAdapterWithAccessKey(bf.log, accessKey, bf.overlay)
+	return newUserClientAdapterWithAccessKey(bf.log, accessKey, bf.overlay, bf.overlayAPIVersion)
 }

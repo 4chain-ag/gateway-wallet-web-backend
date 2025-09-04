@@ -5,14 +5,14 @@ import (
 	"strings"
 
 	"github.com/4chain-AG/gateway-overlay/pkg/token_engine/bsv21"
-	"github.com/bitcoin-sv/go-sdk/chainhash"
-	bip32 "github.com/bitcoin-sv/go-sdk/compat/bip32"
-	"github.com/bitcoin-sv/go-sdk/script"
-	"github.com/bitcoin-sv/go-sdk/transaction"
-	sdkTx "github.com/bitcoin-sv/go-sdk/transaction"
-	sighash "github.com/bitcoin-sv/go-sdk/transaction/sighash"
-	"github.com/bitcoin-sv/go-sdk/transaction/template/p2pkh"
 	"github.com/bitcoin-sv/spv-wallet/models/response"
+	"github.com/bsv-blockchain/go-sdk/chainhash"
+	bip32 "github.com/bsv-blockchain/go-sdk/compat/bip32"
+	"github.com/bsv-blockchain/go-sdk/script"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	sdkTx "github.com/bsv-blockchain/go-sdk/transaction"
+	sighash "github.com/bsv-blockchain/go-sdk/transaction/sighash"
+	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 )
 
 func spvUtxosToUtxos(src []*response.Utxo) ([]*transaction.UTXO, error) {
@@ -50,24 +50,60 @@ func isEF(hex string) bool {
 	return len(hex) > 20 && strings.EqualFold(hex[8:20], efMarker)
 }
 
-func getStableCoinValue(txID string, tx *sdkTx.Transaction) *bsv21.TokenOperation {
-	// Assumption: The first output token is the transferred value, others are treated as the remainder.
-	// Someday, somehow, maybe this can be handled better, though I doubt it.
+func getStableCoinValue(txID string, tx *sdkTx.Transaction, txOutputsIndexes, txFeeIndexes []int, txDirection string) *bsv21.TokenOperation {
+	if len(txOutputsIndexes) == 0 {
+		return nil
+	}
 
-	for vout, out := range tx.Outputs {
-		ins, _ := bsv21.FindInscription(out.LockingScript)
-		if ins != nil {
-			ttxo, err := bsv21.NewFromInscription(txID, uint32(vout), ins) //nolint: gosec
-			if err != nil {
-				// ignore and take next utxo
-				continue
-			}
+	result := processIndexes(txID, tx, txOutputsIndexes)
 
-			return ttxo
+	if txDirection == "outgoing" {
+		feeToken := processIndexes(txID, tx, txFeeIndexes)
+		if result == nil {
+			result = feeToken
+		} else if feeToken != nil {
+			result.Amount += feeToken.Amount
 		}
 	}
 
-	return nil
+	return result
+}
+
+func processIndexes(txID string, tx *sdkTx.Transaction, indexes []int) *bsv21.TokenOperation {
+	var tokenOp *bsv21.TokenOperation
+	for _, vout := range indexes {
+		if vout >= len(tx.Outputs) || vout < 0 {
+			continue // Skip invalid index
+		}
+
+		ins, _ := bsv21.FindInscription(tx.Outputs[vout].LockingScript)
+		if ins == nil {
+			continue
+		}
+
+		ttxo, err := bsv21.NewFromInscription(txID, uint32(vout), ins)
+		if err != nil {
+			continue // Ignore and take the next utxo
+		}
+
+		if tokenOp == nil {
+			// This assumes all tokens have the same metadata, which is consistent with the original logic.
+			tokenOp = &bsv21.TokenOperation{
+				ID:        ttxo.ID,
+				Amount:    ttxo.Amount,
+				Symbol:    ttxo.Symbol,
+				Decimals:  ttxo.Decimals,
+				Icon:      ttxo.Icon,
+				Meta:      ttxo.Meta,
+				Operation: ttxo.Operation,
+				SrcTxID:   ttxo.SrcTxID,
+				SrcVout:   ttxo.SrcVout,
+			}
+		} else {
+			tokenOp.Amount += ttxo.Amount
+		}
+	}
+	return tokenOp
 }
 
 func signTransactionEF(draft *response.DraftTransaction, xPriv string) (efHex string, err error) {
